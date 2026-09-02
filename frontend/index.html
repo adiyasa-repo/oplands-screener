@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oplands-screener</title>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <aside class="sidebar">
+    <header class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2C12 2 5 10.5 5 15a7 7 0 0 0 14 0c0-4.5-7-13-7-13Z" fill="currentColor" opacity="0.9"/>
+        </svg>
+      </div>
+      <div>
+        <h1>Oplands-screener</h1>
+        <p class="tagline">Cloudburst &amp; drainage risk screening — Vejle Kommune</p>
+      </div>
+    </header>
+
+    <section class="panel">
+      <div class="mode-tabs" role="tablist">
+        <button class="mode-tab is-active" data-mode="select" role="tab" aria-selected="true">Select a plan area</button>
+        <button class="mode-tab" data-mode="draw" role="tab" aria-selected="false">Draw your own</button>
+      </div>
+
+      <div class="mode-panel" data-mode-panel="select">
+        <div class="search-row">
+          <svg class="search-icon" viewBox="0 0 20 20" fill="none"><path d="M9 16a7 7 0 1 1 0-14 7 7 0 0 1 0 14Zm9 2-4.35-4.35" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <input id="area-search" type="text" placeholder="Filter by plan code…" autocomplete="off">
+        </div>
+        <ul id="area-list" class="area-list"></ul>
+      </div>
+
+      <div class="mode-panel is-hidden" data-mode-panel="draw">
+        <p class="hint">Draw a polygon anywhere on the map to define a custom area of interest.</p>
+        <button id="start-draw" class="btn btn-secondary">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M4 16 14 6m0 0h-5m5 0v5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Start drawing
+        </button>
+        <button id="clear-draw" class="btn btn-ghost is-hidden">Clear drawing</button>
+      </div>
+    </section>
+
+    <section class="panel selection-panel is-hidden" id="selection-panel">
+      <div class="selection-label">Selected area</div>
+      <div class="selection-value" id="selection-value">—</div>
+    </section>
+
+    <div class="run-row">
+      <button id="run-btn" class="btn btn-primary" disabled>
+        <span class="btn-label">Run analysis</span>
+      </button>
+      <p class="run-note">Runs a real catchment delineation, flow-accumulation, and bluespot analysis. Takes about 30 seconds.</p>
+    </div>
+
+    <section class="panel results-panel is-hidden" id="results-panel">
+      <div class="results-heading">Results</div>
+      <div class="results-for" id="results-for"></div>
+      <ul class="legend" id="legend"></ul>
+    </section>
+
+    <div class="sidebar-spacer"></div>
+
+    <footer class="sidebar-footer">
+      <a href="https://github.com/adiyasa-repo/oplands-screener" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><path d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38l-.01-1.49c-2.01.44-2.43-.97-2.43-.97-.33-.83-.8-1.05-.8-1.05-.66-.45.05-.44.05-.44.72.05 1.1.74 1.1.74.64 1.1 1.68.78 2.09.6.07-.46.25-.78.46-.96-1.6-.18-3.29-.8-3.29-3.57 0-.79.28-1.43.74-1.94-.07-.18-.32-.92.07-1.92 0 0 .6-.19 1.98.74a6.9 6.9 0 0 1 3.6 0c1.38-.93 1.98-.74 1.98-.74.39 1 .14 1.74.07 1.92.46.51.74 1.15.74 1.94 0 2.78-1.7 3.39-3.31 3.57.26.22.49.66.49 1.33l-.01 1.97c0 .21.14.45.55.38A8 8 0 0 0 8 0Z"/></svg>
+        View source on GitHub
+      </a>
+    </footer>
+  </aside>
+
+  <main class="map-pane">
+    <div id="map"></div>
+
+    <div class="status-overlay is-hidden" id="status-overlay">
+      <div class="status-card">
+        <div class="spinner"></div>
+        <div class="status-text" id="status-text">Running analysis…</div>
+        <div class="status-elapsed" id="status-elapsed">0s</div>
+      </div>
+    </div>
+
+    <div class="toast is-hidden" id="toast"></div>
+  </main>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

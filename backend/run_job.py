@@ -17,6 +17,7 @@ import os
 import sys
 import shutil
 import json
+import tempfile
 import traceback
 
 import geopandas as gpd
@@ -26,7 +27,15 @@ BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(BACKEND_DIR)
 SCRIPTS_DIR = os.path.join(REPO_ROOT, "Scripts")
 BASE_DATA_INPUT = os.path.join(REPO_ROOT, "Data", "Input")
-WORKDIR = os.path.join(BACKEND_DIR, "workdir")
+
+# Deliberately NOT inside the repo by default: on a machine where the repo
+# lives in a cloud-synced folder (OneDrive, Dropbox, ...), files the
+# pipeline creates/deletes here get caught mid-sync and locked -- hit this
+# twice in local testing (a shutil.rmtree "Access is denied" on a folder
+# OneDrive was still indexing). A plain temp directory sidesteps that
+# entirely and works identically on the production server (no sync client
+# there at all). Override with OPLANDS_WORKDIR if you want it elsewhere.
+WORKDIR = os.environ.get("OPLANDS_WORKDIR") or os.path.join(tempfile.gettempdir(), "oplands-screener-workdir")
 
 sys.path.insert(0, SCRIPTS_DIR)
 
