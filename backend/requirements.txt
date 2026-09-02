@@ -1,0 +1,6 @@
+# Installed on top of the geo_env conda environment (qgis, gdal, pcraster,
+# geopandas -- see ../Scripts/env_bootstrap.py). This API must be run with
+# that environment's own python.exe, not a plain venv, since it needs the
+# PyQGIS/processing bindings.
+fastapi
+uvicorn[standard]

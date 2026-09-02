@@ -11,6 +11,10 @@ Data/Results/
 __pycache__/
 *.pyc
 
+# Backend runtime state (seeded copies of Data/Input + per-job files,
+# regenerated as needed -- see backend/run_job.py)
+backend/workdir/
+
 # Future backend/frontend build artifacts
 backend/.venv/
 backend/__pycache__/
