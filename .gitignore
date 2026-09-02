@@ -1,0 +1,22 @@
+# Secrets - never commit
+.env
+Scripts/.env
+
+# Runtime-generated pipeline output (regenerated on each run)
+Data/Output/
+Data/Temporary/
+Data/Results/
+
+# Python
+__pycache__/
+*.pyc
+
+# Future backend/frontend build artifacts
+backend/.venv/
+backend/__pycache__/
+frontend/node_modules/
+frontend/dist/
+
+# OS junk
+.DS_Store
+Thumbs.db
