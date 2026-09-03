@@ -202,17 +202,31 @@ function clearResultLayers() {
   document.getElementById("results-panel").classList.add("is-hidden");
 }
 
-// Linear diameter scaling anchored at value=0, matching how QGIS's own
-// "GraduatedSize" / scale_method="diameter" renders these same layers
-// (ID15Streams.qml / CloudburstStreams.qml): a point with no flow gets
-// close to minRadius, the single largest-flow point in the result gets
-// maxRadius, everything else in between scales proportionally to its own
-// value -- not to a fixed universal value, since a different area's flow
-// volumes can be an entirely different order of magnitude.
-function radiusForValue(value, style, maxValue) {
-  if (!maxValue || !isFinite(value) || value <= 0) return style.minRadius;
-  const t = Math.min(value / maxValue, 1);
-  return style.minRadius + t * (style.maxRadius - style.minRadius);
+// Percentile-rank size scaling, not raw-value linear scaling. Confirmed
+// against real output (see project notes): flow accumulation is heavily
+// right-skewed -- for a real run, 79-90% of points fell within 10% of
+// that layer's own max value. A plain linear value->radius map crams
+// that entire majority near minRadius and only lets a couple of outlier
+// trunk-channel points grow, which reads as visually flat -- exactly the
+// problem reported. QGIS's own styling (ID15Streams.qml /
+// CloudburstStreams.qml) sidesteps this with 50 *quantile* classes
+// (equal population per bin, not equal value-width), which is really a
+// discretized rank-based size mapping. This reproduces that continuously:
+// a point's radius depends on where its value ranks among this result's
+// own points, not on the raw magnitude, so the size differences spread
+// across the whole population instead of collapsing onto a few outliers.
+function buildRankLookup(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  return (value) => {
+    if (!sorted.length || !isFinite(value) || value <= 0) return 0;
+    // Index of the first element > value == count of elements <= value.
+    let lo = 0, hi = sorted.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (sorted[mid] <= value) lo = mid + 1; else hi = mid;
+    }
+    return lo / sorted.length;
+  };
 }
 
 function renderResults(layers, label) {
@@ -228,15 +242,18 @@ function renderResults(layers, label) {
     const count = geojson.features.length;
     let layer;
     if (style.kind === "point") {
-      const maxValue = geojson.features.reduce((max, f) => {
-        const v = Number(f.properties?.[style.valueField]);
-        return isFinite(v) && v > max ? v : max;
-      }, 0);
+      const values = geojson.features
+        .map((f) => Number(f.properties?.[style.valueField]))
+        .filter((v) => isFinite(v) && v > 0);
+      const rankOf = buildRankLookup(values);
       layer = L.geoJSON(geojson, {
-        pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
-          radius: radiusForValue(Number(feature.properties?.[style.valueField]), style, maxValue),
-          color: style.color, weight: 0, fillColor: style.color, fillOpacity: 0.85,
-        }),
+        pointToLayer: (feature, latlng) => {
+          const rank = rankOf(Number(feature.properties?.[style.valueField]));
+          const radius = style.minRadius + rank * (style.maxRadius - style.minRadius);
+          return L.circleMarker(latlng, {
+            radius, color: style.color, weight: 0, fillColor: style.color, fillOpacity: 0.85,
+          });
+        },
       });
     } else {
       layer = L.geoJSON(geojson, { style: () => style });
