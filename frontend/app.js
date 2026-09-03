@@ -5,12 +5,24 @@ const API_BASE = (location.hostname === "localhost" || location.hostname === "12
   : "https://api.adiyasa.dk";
 
 // Layer styling -- names match the QGIS project's own layer names exactly.
+// Opland: fill ~12% darker than the original #0e7490, border weight +25%
+// (2 -> 2.5). Bluespot: switched from red to a deep navy blue -- it
+// indicates standing/pooled water, not a hazard-red alert.
 const RESULT_LAYER_STYLES = {
-  "Opland": { color: "#0e7490", weight: 2, fillColor: "#0e7490", fillOpacity: 0.12, kind: "polygon" },
+  "Opland": { color: "#0c657d", weight: 2.5, fillColor: "#0c657d", fillOpacity: 0.12, kind: "polygon" },
   "Selected ID15": { color: "#6b7280", weight: 1.5, dashArray: "5,4", fillOpacity: 0, kind: "polygon" },
-  "Bluespot": { color: "#dc2626", weight: 1, fillColor: "#ef4444", fillOpacity: 0.5, kind: "polygon" },
-  "Vandveje (Opland)": { color: "#2563eb", kind: "point", radius: 3 },
-  "Vandveje (ID15)": { color: "#60a5fa", kind: "point", radius: 2 },
+  "Bluespot": { color: "#1e3a8a", weight: 1, fillColor: "#1e40af", fillOpacity: 0.55, kind: "polygon" },
+  // Point layers: circle radius scales with each point's own sampled flow-
+  // accumulation value (the "resampled_1" field QGIS's own graduated-size
+  // styles use -- see ID15Streams.qml/CloudburstStreams.qml,
+  // graduatedMethod="GraduatedSize" scale_method="diameter" on that exact
+  // field), not a fixed dot size. Small streams stay small; the channels
+  // carrying real volume visibly grow. Min/max radius are picked per
+  // result from that layer's own value range (see sizeForValue below),
+  // same idea as QGIS classifying against the loaded data, not a fixed
+  // universal scale.
+  "Vandveje (Opland)": { color: "#2563eb", kind: "point", valueField: "resampled_1", minRadius: 1.5, maxRadius: 16 },
+  "Vandveje (ID15)": { color: "#60a5fa", kind: "point", valueField: "resampled_1", minRadius: 1, maxRadius: 11 },
 };
 
 // Draw order, bottom to top.
@@ -190,6 +202,19 @@ function clearResultLayers() {
   document.getElementById("results-panel").classList.add("is-hidden");
 }
 
+// Linear diameter scaling anchored at value=0, matching how QGIS's own
+// "GraduatedSize" / scale_method="diameter" renders these same layers
+// (ID15Streams.qml / CloudburstStreams.qml): a point with no flow gets
+// close to minRadius, the single largest-flow point in the result gets
+// maxRadius, everything else in between scales proportionally to its own
+// value -- not to a fixed universal value, since a different area's flow
+// volumes can be an entirely different order of magnitude.
+function radiusForValue(value, style, maxValue) {
+  if (!maxValue || !isFinite(value) || value <= 0) return style.minRadius;
+  const t = Math.min(value / maxValue, 1);
+  return style.minRadius + t * (style.maxRadius - style.minRadius);
+}
+
 function renderResults(layers, label) {
   clearResultLayers();
   const legend = document.getElementById("legend");
@@ -203,9 +228,14 @@ function renderResults(layers, label) {
     const count = geojson.features.length;
     let layer;
     if (style.kind === "point") {
+      const maxValue = geojson.features.reduce((max, f) => {
+        const v = Number(f.properties?.[style.valueField]);
+        return isFinite(v) && v > max ? v : max;
+      }, 0);
       layer = L.geoJSON(geojson, {
         pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
-          radius: style.radius, color: style.color, weight: 0, fillColor: style.color, fillOpacity: 0.85,
+          radius: radiusForValue(Number(feature.properties?.[style.valueField]), style, maxValue),
+          color: style.color, weight: 0, fillColor: style.color, fillOpacity: 0.85,
         }),
       });
     } else {
