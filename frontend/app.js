@@ -5,11 +5,13 @@ const API_BASE = (location.hostname === "localhost" || location.hostname === "12
   : "https://api.adiyasa.dk";
 
 // Layer styling -- names match the QGIS project's own layer names exactly.
-// Opland: fill ~12% darker than the original #0e7490, border weight +25%
-// (2 -> 2.5). Bluespot: switched from red to a deep navy blue -- it
-// indicates standing/pooled water, not a hazard-red alert.
+// Opland: dark slate-teal border and fill, well past the original
+// #0e7490 -- needs to read as a clearly-bounded catchment outline even
+// against the other teal-ish map elements, not just a faint tint.
+// Bluespot: switched from red to a deep navy blue -- it indicates
+// standing/pooled water, not a hazard-red alert.
 const RESULT_LAYER_STYLES = {
-  "Opland": { color: "#0c657d", weight: 2.5, fillColor: "#0c657d", fillOpacity: 0.12, kind: "polygon" },
+  "Opland": { color: "#082f3a", weight: 3, fillColor: "#0a4a5c", fillOpacity: 0.22, kind: "polygon" },
   "Selected ID15": { color: "#6b7280", weight: 1.5, dashArray: "5,4", fillOpacity: 0, kind: "polygon" },
   "Bluespot": { color: "#1e3a8a", weight: 1, fillColor: "#1e40af", fillOpacity: 0.55, kind: "polygon" },
   // Point layers: circle radius scales with each point's own sampled flow-
@@ -84,8 +86,11 @@ async function loadKloakoplande() {
   const res = await fetch("data/kloakoplande.geojson");
   const geojson = await res.json();
 
+  // Bright orange -- deliberately far from the teal used everywhere else
+  // on the map, so the selectable plan-area layer reads as its own thing
+  // at a glance, not just another shade of the base styling.
   kloakLayer = L.geoJSON(geojson, {
-    style: () => ({ color: "#0e7490", weight: 1.5, fillColor: "#0e7490", fillOpacity: 0.06 }),
+    style: () => ({ color: "#c2410c", weight: 1.5, fillColor: "#f97316", fillOpacity: 0.22 }),
     onEachFeature: (feature, layer) => {
       layer.on("click", () => selectAreaFeature(feature, layer));
     },
@@ -127,7 +132,7 @@ function findKloakLayerByCode(code) {
 function selectAreaFeature(feature, layer) {
   if (isRunning) return;
   kloakLayer.eachLayer((l) => kloakLayer.resetStyle(l));
-  layer.setStyle({ color: "#0e7490", weight: 3, fillOpacity: 0.25 });
+  layer.setStyle({ color: "#9a3412", weight: 3, fillColor: "#f97316", fillOpacity: 0.45 });
   layer.bringToFront();
 
   document.querySelectorAll(".area-item").forEach((el) => {
