@@ -35,6 +35,13 @@ let currentMode = "select";
 let resultLayers = {};
 let isRunning = false;
 
+// Combined multiplier applied to both stream layers' min/max radius, live-
+// adjustable via the sidebar slider so you can tune the look without
+// re-running the analysis (it's a pure restyle -- the underlying data and
+// each point's rank don't change). Persists across runs rather than
+// resetting to 1 each time, so a chosen setting stays put.
+let streamWidthScale = 1;
+
 function initMap() {
   map = L.map("map", { preferCanvas: true, zoomControl: false });
   L.control.zoom({ position: "bottomright" }).addTo(map);
@@ -229,6 +236,25 @@ function buildRankLookup(values) {
   };
 }
 
+function radiusForRank(rank, style, scale) {
+  return (style.minRadius + rank * (style.maxRadius - style.minRadius)) * scale;
+}
+
+// Re-applies the current streamWidthScale to whatever stream layers are
+// already on the map, using each marker's stored rank -- no re-fetch, no
+// re-run, just a restyle. Safe to call even when no results are rendered
+// yet (both lookups just come back empty).
+function applyStreamWidthScale() {
+  ["Vandveje (ID15)", "Vandveje (Opland)"].forEach((name) => {
+    const layer = resultLayers[name];
+    const style = RESULT_LAYER_STYLES[name];
+    if (!layer) return;
+    layer.eachLayer((marker) => {
+      marker.setRadius(radiusForRank(marker.options.radiusRank, style, streamWidthScale));
+    });
+  });
+}
+
 function renderResults(layers, label) {
   clearResultLayers();
   const legend = document.getElementById("legend");
@@ -249,9 +275,13 @@ function renderResults(layers, label) {
       layer = L.geoJSON(geojson, {
         pointToLayer: (feature, latlng) => {
           const rank = rankOf(Number(feature.properties?.[style.valueField]));
-          const radius = style.minRadius + rank * (style.maxRadius - style.minRadius);
           return L.circleMarker(latlng, {
-            radius, color: style.color, weight: 0, fillColor: style.color, fillOpacity: 0.85,
+            // radiusRank is stored (not just the computed radius) so the
+            // width slider can recompute it live against a new scale
+            // without redoing the rank lookup or touching the data at all.
+            radius: radiusForRank(rank, style, streamWidthScale),
+            radiusRank: rank,
+            color: style.color, weight: 0, fillColor: style.color, fillOpacity: 0.85,
           });
         },
       });
@@ -275,6 +305,11 @@ function renderResults(layers, label) {
     });
     legend.appendChild(li);
   });
+
+  // Reflect the persisted scale in the slider itself, in case it was
+  // adjusted on a previous run -- it shouldn't silently reset to 1 here.
+  document.getElementById("stream-width-slider").value = streamWidthScale;
+  document.getElementById("stream-width-value").textContent = `${streamWidthScale.toFixed(1)}×`;
 
   document.getElementById("results-panel").classList.remove("is-hidden");
 
@@ -355,6 +390,12 @@ function init() {
   });
 
   document.getElementById("run-btn").addEventListener("click", runAnalysis);
+
+  document.getElementById("stream-width-slider").addEventListener("input", (e) => {
+    streamWidthScale = Number(e.target.value);
+    document.getElementById("stream-width-value").textContent = `${streamWidthScale.toFixed(1)}×`;
+    applyStreamWidthScale();
+  });
 }
 
 init();
