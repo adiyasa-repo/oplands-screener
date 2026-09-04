@@ -37,6 +37,35 @@ let currentMode = "select";
 let resultLayers = {};
 let isRunning = false;
 
+// Basemap toggle (street map <-> Dataforsyningen aerial orthophoto), Google
+// Maps style: a small live preview square, bottom-left, showing whichever
+// basemap you'd switch TO. Each basemap needs its own tile-layer instance
+// per map (a Leaflet tile layer belongs to one map at a time), hence the
+// separate *Main/*Mini pairs below.
+let osmMain, ortofotoMain, osmMini, ortofotoMini, miniMap;
+let activeBasemap = "osm";
+
+function makeOsmLayer() {
+  return L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap contributors",
+    maxZoom: 19,
+  });
+}
+
+// Routed through our own backend, not Dataforsyningen directly -- the WMS
+// call needs an API key, and that key is a credential that must never end
+// up in the public frontend JS or the public repo (see backend/app.py).
+function makeOrtofotoLayer() {
+  return L.tileLayer.wms(`${API_BASE}/tiles/ortofoto`, {
+    layers: "orto_foraar",
+    format: "image/png",
+    version: "1.1.1",
+    transparent: false,
+    maxZoom: 19,
+    attribution: "Ortofoto: Dataforsyningen/SDFI",
+  });
+}
+
 // Combined multiplier applied to both stream layers' min/max radius, live-
 // adjustable via the sidebar slider so you can tune the look without
 // re-running the analysis (it's a pure restyle -- the underlying data and
@@ -47,11 +76,63 @@ let streamWidthScale = 1;
 function initMap() {
   map = L.map("map", { preferCanvas: true, zoomControl: false });
   L.control.zoom({ position: "bottomright" }).addTo(map);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "&copy; OpenStreetMap contributors",
-    maxZoom: 19,
-  }).addTo(map);
+  osmMain = makeOsmLayer().addTo(map);
+  ortofotoMain = makeOrtofotoLayer();
   map.setView([55.913, 9.322], 14);
+}
+
+function initBasemapToggle() {
+  const control = L.control({ position: "bottomleft" });
+  control.onAdd = function () {
+    const container = L.DomUtil.create("div", "basemap-toggle");
+    container.innerHTML =
+      '<div class="basemap-toggle-thumb" id="basemap-toggle-thumb"></div>' +
+      '<span class="basemap-toggle-label" id="basemap-toggle-label">Ortofoto</span>';
+    L.DomEvent.disableClickPropagation(container);
+    L.DomEvent.on(container, "click", toggleBasemap);
+    return container;
+  };
+  control.addTo(map);
+
+  miniMap = L.map("basemap-toggle-thumb", {
+    zoomControl: false,
+    attributionControl: false,
+    dragging: false,
+    scrollWheelZoom: false,
+    doubleClickZoom: false,
+    boxZoom: false,
+    keyboard: false,
+    touchZoom: false,
+    tap: false,
+    fadeAnimation: false,
+  });
+  // Mini map always previews the basemap you'd switch TO, i.e. whichever
+  // one is NOT active on the main map right now.
+  ortofotoMini = makeOrtofotoLayer().addTo(miniMap);
+  miniMap.setView(map.getCenter(), map.getZoom());
+
+  map.on("move zoom", () => miniMap.setView(map.getCenter(), map.getZoom(), { animate: false }));
+}
+
+function toggleBasemap() {
+  const label = document.getElementById("basemap-toggle-label");
+  if (activeBasemap === "osm") {
+    map.removeLayer(osmMain);
+    ortofotoMain.addTo(map);
+    miniMap.removeLayer(ortofotoMini);
+    osmMini = osmMini || makeOsmLayer();
+    osmMini.addTo(miniMap);
+    label.textContent = "Kort";
+    activeBasemap = "ortofoto";
+  } else {
+    map.removeLayer(ortofotoMain);
+    osmMain.addTo(map);
+    miniMap.removeLayer(osmMini);
+    ortofotoMini = ortofotoMini || makeOrtofotoLayer();
+    ortofotoMini.addTo(miniMap);
+    label.textContent = "Ortofoto";
+    activeBasemap = "osm";
+  }
 }
 
 function initDrawing() {
@@ -67,7 +148,7 @@ function initDrawing() {
     drawnItems.addLayer(e.layer);
     drawnLayer = e.layer;
     selectedGeometry = e.layer.toGeoJSON().geometry;
-    selectedLabel = "Custom drawn area";
+    selectedLabel = "Selvtegnet område";
     document.getElementById("clear-draw").classList.remove("is-hidden");
     updateSelectionUI();
   });
@@ -140,7 +221,7 @@ function selectAreaFeature(feature, layer) {
   });
 
   selectedGeometry = feature.geometry;
-  selectedLabel = `Plan area ${feature.properties.navn1201}`;
+  selectedLabel = `Planområde ${feature.properties.navn1201}`;
   updateSelectionUI();
 }
 
@@ -339,7 +420,7 @@ async function pollJob(jobId) {
     }
     if (data.status === "error") {
       clearInterval(tick);
-      throw new Error(data.error || "Analysis failed.");
+      throw new Error(data.error || "Analysen fejlede.");
     }
   }
 }
@@ -366,12 +447,12 @@ async function runAnalysis() {
       const data = await res.json();
       throw new Error(data.detail);
     }
-    if (!res.ok) throw new Error(`Request failed (${res.status})`);
+    if (!res.ok) throw new Error(`Forespørgsel mislykkedes (${res.status})`);
     const { job_id } = await res.json();
     const layers = await pollJob(job_id);
     renderResults(layers, analyzedLabel);
   } catch (err) {
-    showToast(err.message || "Something went wrong.");
+    showToast(err.message || "Der gik noget galt.");
   } finally {
     hideStatus();
     setUILocked(false);
@@ -380,6 +461,7 @@ async function runAnalysis() {
 
 function init() {
   initMap();
+  initBasemapToggle();
   initDrawing();
   loadKloakoplande();
 

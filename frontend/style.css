@@ -468,6 +468,53 @@ html, body {
 .status-text { font-size: 14px; font-weight: 600; }
 .status-elapsed { font-size: 12.5px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 
+/* Basemap toggle -- Google Maps style live preview square, bottom-left. */
+.basemap-toggle {
+  position: relative;
+  width: 84px;
+  height: 84px;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  border: 2px solid white;
+  background: var(--surface-2);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.basemap-toggle:hover {
+  transform: scale(1.04);
+  box-shadow: var(--shadow-lg);
+}
+
+.basemap-toggle-thumb {
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+/* Leaflet's own control positioning wraps this in absolutely-positioned
+   panes; the mini map needs an explicit size so it isn't 0x0 the instant
+   it initializes. */
+.basemap-toggle-thumb .leaflet-container {
+  width: 84px;
+  height: 84px;
+  background: var(--surface-2);
+  font: inherit;
+}
+
+.basemap-toggle-label {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 4px 0 5px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0));
+  pointer-events: none;
+}
+
 .toast {
   position: absolute;
   left: 50%;

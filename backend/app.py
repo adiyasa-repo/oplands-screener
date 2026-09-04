@@ -20,10 +20,14 @@ import json
 import uuid
 import threading
 import subprocess
+import urllib.request
+import urllib.parse
+import urllib.error
 from typing import Any, Dict
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 JOBS_DIR = os.path.join(BACKEND_DIR, "workdir", "jobs")
@@ -46,6 +50,65 @@ app.add_middleware(
 # Anyone else gets told to wait rather than queued.
 _lock = threading.Lock()
 _jobs: Dict[str, Dict[str, Any]] = {}
+
+
+# --- Basemap tile proxy --------------------------------------------------
+#
+# The aerial-photo basemap comes from Dataforsyningen (Danish public
+# geodata), which requires an API key. That key is a credential -- already
+# treated as one in Scripts/utils.py (kept out of source control) -- so it
+# must never reach the public frontend JS or the public repo. This
+# endpoint holds the key server-side and proxies WMS tile requests: the
+# frontend points Leaflet's tileLayer.wms at this URL instead of at
+# Dataforsyningen directly, and the key never leaves the server.
+
+SCRIPTS_DIR = os.path.join(os.path.dirname(BACKEND_DIR), "Scripts")
+DATAFORSYNINGEN_ORTOFOTO_WMS = "https://wms.datafordeler.dk/GeoDanmarkOrto/orto_foraar/1.0.0/WMS"
+
+
+def _dataforsyningen_apikey() -> str:
+    # Same lookup order as Scripts/utils.py's get_dataforsyningen_apikey(),
+    # reimplemented rather than imported so this lightweight API process
+    # never pulls in qgis.core/pcraster/geopandas at import time (see the
+    # module docstring on why that's deliberately avoided here).
+    env_file = os.path.join(SCRIPTS_DIR, ".env")
+    if os.path.isfile(env_file):
+        with open(env_file, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                if key.strip() == "DATAFORSYNINGEN_API_KEY" and value.strip():
+                    return value.strip()
+
+    env_value = os.environ.get("DATAFORSYNINGEN_API_KEY")
+    if env_value:
+        return env_value
+
+    # Deliberately no QGIS-settings fallback here (unlike utils.py's tier
+    # 3): this process never runs env_bootstrap, so `import qgis` isn't
+    # reachable from it -- set DATAFORSYNINGEN_API_KEY in Scripts/.env or
+    # as a real environment variable instead.
+    raise HTTPException(
+        status_code=503,
+        detail="Ortofoto-baggrundskort er ikke konfigureret (mangler Dataforsyningen API-nøgle på serveren).",
+    )
+
+
+@app.get("/tiles/ortofoto")
+def ortofoto_tile(request: Request):
+    apikey = _dataforsyningen_apikey()
+    params = dict(request.query_params)
+    params["apikey"] = apikey
+    url = f"{DATAFORSYNINGEN_ORTOFOTO_WMS}?{urllib.parse.urlencode(params)}"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            content = resp.read()
+            content_type = resp.headers.get("Content-Type", "image/png")
+    except urllib.error.URLError as e:
+        raise HTTPException(status_code=502, detail=f"Kunne ikke hente ortofoto-tile: {e}")
+    return Response(content=content, media_type=content_type)
 
 
 def _extract_geometry(body: dict) -> dict:
@@ -95,7 +158,7 @@ def analyze(body: dict):
     if not _lock.acquire(blocking=False):
         raise HTTPException(
             status_code=429,
-            detail="A job is already running. Please wait for it to finish and try again.",
+            detail="En analyse kører allerede. Vent til den er færdig, og prøv igen.",
         )
 
     job_id = str(uuid.uuid4())
