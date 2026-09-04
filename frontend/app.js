@@ -27,25 +27,26 @@ const RESULT_LAYER_STYLES = {
   "Vandveje (ID15)": { color: "#60a5fa", kind: "point", valueField: "resampled_1", minRadius: 1, maxRadius: 11 },
 };
 
-// Opland's own border (above) tends to get swallowed by whatever's drawn
-// after it -- Bluespot's solid fill in particular can cover most of the
-// catchment. Rather than raising Opland's fill/weight (which would start
-// tinting the streams and bluespots drawn over it, breaking their visual
-// continuity -- exactly what to avoid), a second, outline-only, no-fill
-// copy is added last and pinned to the very top of the stack each time.
-// Only the crisp boundary line sits above everything; nothing gets
-// covered underneath it.
-const OPLAND_OUTLINE_STYLE = { color: "#082f3a", weight: 3.5, fillOpacity: 0, interactive: false };
-
 // Draw order, bottom to top.
 const RESULT_LAYER_ORDER = ["Selected ID15", "Opland", "Vandveje (ID15)", "Vandveje (Opland)", "Bluespot"];
+
+// The polygon that was actually submitted for analysis (a selected
+// Kloakoplande feature or a freehand drawing) needs to stay clearly
+// visible once results render on top of it. Rendered as its own
+// outline-only (no fill) copy, added last and pinned to the very top of
+// the stack, so the streams underneath stay fully visible -- only the
+// boundary line sits above everything. Magenta rather than the
+// Kloakoplande orange: that color's already used for the unselected plan
+// areas still visible underneath, so reusing it here would blend in
+// exactly where it needs to stand out.
+const ANALYZED_AREA_STYLE = { color: "#e6007e", weight: 3.5, fillOpacity: 0, dashArray: "8,4", interactive: false };
 
 let map, kloakLayer, drawnLayer, drawControl;
 let selectedGeometry = null;
 let selectedLabel = null;
 let currentMode = "select";
 let resultLayers = {};
-let oplandOutlineLayer = null;
+let analyzedAreaLayer = null;
 let isRunning = false;
 
 // Basemap toggle (street map <-> Dataforsyningen aerial orthophoto), Google
@@ -302,9 +303,9 @@ function hideStatus() {
 function clearResultLayers() {
   Object.values(resultLayers).forEach((layer) => map.removeLayer(layer));
   resultLayers = {};
-  if (oplandOutlineLayer) {
-    map.removeLayer(oplandOutlineLayer);
-    oplandOutlineLayer = null;
+  if (analyzedAreaLayer) {
+    map.removeLayer(analyzedAreaLayer);
+    analyzedAreaLayer = null;
   }
   document.getElementById("legend").innerHTML = "";
   document.getElementById("results-panel").classList.add("is-hidden");
@@ -356,7 +357,7 @@ function applyStreamWidthScale() {
   });
 }
 
-function renderResults(layers, label) {
+function renderResults(layers, label, geometry) {
   clearResultLayers();
   const legend = document.getElementById("legend");
   document.getElementById("results-for").textContent = label;
@@ -404,20 +405,21 @@ function renderResults(layers, label) {
       if (e.target.checked) {
         layer.addTo(map);
         // Re-adding a layer puts it on top again, which would otherwise
-        // bury the Opland outline back under it.
-        if (oplandOutlineLayer) oplandOutlineLayer.bringToFront();
-        if (name === "Opland" && oplandOutlineLayer) oplandOutlineLayer.addTo(map);
+        // bury the analyzed-area outline back under it.
+        if (analyzedAreaLayer) analyzedAreaLayer.bringToFront();
       } else {
         map.removeLayer(layer);
-        if (name === "Opland" && oplandOutlineLayer) map.removeLayer(oplandOutlineLayer);
       }
     });
     legend.appendChild(li);
   });
 
-  if (layers["Opland"]) {
-    oplandOutlineLayer = L.geoJSON(layers["Opland"], { style: () => OPLAND_OUTLINE_STYLE }).addTo(map);
-    oplandOutlineLayer.bringToFront();
+  if (geometry) {
+    analyzedAreaLayer = L.geoJSON(
+      { type: "Feature", geometry, properties: {} },
+      { style: () => ANALYZED_AREA_STYLE }
+    ).addTo(map);
+    analyzedAreaLayer.bringToFront();
   }
 
   // Reflect the persisted scale in the slider itself, in case it was
@@ -478,7 +480,7 @@ async function runAnalysis() {
     if (!res.ok) throw new Error(`Forespørgsel mislykkedes (${res.status})`);
     const { job_id } = await res.json();
     const layers = await pollJob(job_id);
-    renderResults(layers, analyzedLabel);
+    renderResults(layers, analyzedLabel, analyzedGeometry);
   } catch (err) {
     showToast(err.message || "Der gik noget galt.");
   } finally {
