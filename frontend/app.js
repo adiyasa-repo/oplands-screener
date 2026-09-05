@@ -1,8 +1,10 @@
-// API base: talk to a local backend during development, the deployed one
-// once this is actually hosted.
+// API base: talk to a local backend during development. In production the
+// frontend and API share one origin (opland.adiyasa.dk) -- Caddy proxies
+// /api/* to the backend -- so a relative path is all that's needed there,
+// and it means the browser never makes a cross-origin request at all.
 const API_BASE = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
   ? "http://127.0.0.1:8000"
-  : "https://api.adiyasa.dk";
+  : "/api";
 
 // Layer styling -- names match the QGIS project's own layer names exactly.
 // Opland: dark slate-teal border and fill, well past the original

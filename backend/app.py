@@ -36,11 +36,17 @@ os.makedirs(JOBS_DIR, exist_ok=True)
 
 app = FastAPI(title="Oplands-screener API")
 
-# Restrict this to the actual frontend origin once it's deployed (e.g.
-# "https://adiyasa-repo.github.io") rather than "*".
+# The deployed frontend shares its origin with this API (Caddy proxies
+# opland.adiyasa.dk/api/* here), so production traffic never triggers CORS
+# at all -- this only matters for local development, where the frontend's
+# preview server and this API run on two different ports. allow_origin_regex
+# covers that without hardcoding a port number: the frontend dev server's
+# port is picked dynamically (see .claude/launch.json's autoPort), so a
+# fixed allow_origins entry would silently stop matching whenever it moves.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://opland.adiyasa.dk"],
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
