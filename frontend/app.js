@@ -9,11 +9,20 @@ const API_BASE = (location.hostname === "localhost" || location.hostname === "12
 // #0e7490 -- needs to read as a clearly-bounded catchment outline even
 // against the other teal-ish map elements, not just a faint tint.
 // Bluespot: switched from red to a deep navy blue -- it indicates
-// standing/pooled water, not a hazard-red alert.
+// standing/pooled water, not a hazard-red alert; borderless (weight 0)
+// for a cleaner look. (An overlap-based darkening effect was considered
+// but dropped: checked against real output -- 5,084 features in one run
+// -- and bluespot polygons never actually overlap each other, so there
+// was nothing to darken.)
+//
+// interactive:false on every one of these: none of them have a click
+// handler or popup, so leaving them clickable only caused harm -- once
+// any of these render on top of the Kloakoplande layer, they'd silently
+// swallow clicks meant for whatever plan-area polygon is underneath.
 const RESULT_LAYER_STYLES = {
-  "Opland": { color: "#082f3a", weight: 3, fillColor: "#0a4a5c", fillOpacity: 0.22, kind: "polygon" },
-  "Selected ID15": { color: "#6b7280", weight: 1.5, dashArray: "5,4", fillOpacity: 0, kind: "polygon" },
-  "Bluespot": { color: "#1e3a8a", weight: 1, fillColor: "#1e40af", fillOpacity: 0.55, kind: "polygon" },
+  "Opland": { color: "#082f3a", weight: 3, fillColor: "#0a4a5c", fillOpacity: 0.22, kind: "polygon", interactive: false },
+  "Selected ID15": { color: "#6b7280", weight: 1.5, dashArray: "5,4", fillOpacity: 0, kind: "polygon", interactive: false },
+  "Bluespot": { color: "#1e40af", weight: 0, fillColor: "#1e40af", fillOpacity: 0.55, kind: "polygon", interactive: false },
   // Point layers: circle radius scales with each point's own sampled flow-
   // accumulation value (the "resampled_1" field QGIS's own graduated-size
   // styles use -- see ID15Streams.qml/CloudburstStreams.qml,
@@ -453,6 +462,7 @@ function renderResults(layers, label, geometry) {
             radius: radiusForRank(rank, style, streamWidthScale),
             radiusRank: rank,
             color: style.color, weight: 0, fillColor: style.color, fillOpacity: 0.85,
+            interactive: false,
           });
         },
       });
