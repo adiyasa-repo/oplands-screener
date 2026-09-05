@@ -131,5 +131,25 @@ def _setup():
         p for p in (*path_prefix_dirs, os.environ.get("PATH", "")) if p
     )
 
+    # A server has no display at all, so Qt's default "xcb" platform plugin
+    # can't connect to one and the process aborts on the first QgsApplication()
+    # call (confirmed by testing: exit code 134, "could not connect to
+    # display"). "offscreen" is Qt's headless platform plugin -- QGIS only
+    # uses Qt for internals here, nothing is ever shown, so rendering
+    # offscreen changes nothing about the pipeline's output.
+    #
+    # Gated on there being no DISPLAY/WAYLAND_DISPLAY (i.e. actually
+    # headless) rather than unconditionally on Linux, so this doesn't
+    # override a real desktop session -- and via setdefault, so an explicit
+    # QT_QPA_PLATFORM from the caller always wins.
+    headless = os.name != "nt" and not (
+        os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    )
+    if headless:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        qt_plugins_dir = os.path.join(qgis_root, "plugins", "platforms")
+        if os.path.isdir(qt_plugins_dir):
+            os.environ.setdefault("QT_QPA_PLATFORM_PLUGIN_PATH", qt_plugins_dir)
+
 
 _setup()
