@@ -27,23 +27,33 @@ const RESULT_LAYER_STYLES = {
   "Vandveje (ID15)": { color: "#60a5fa", kind: "point", valueField: "resampled_1", minRadius: 1, maxRadius: 11 },
 };
 
-// Draw order, bottom to top.
-const RESULT_LAYER_ORDER = ["Selected ID15", "Opland", "Vandveje (ID15)", "Vandveje (Opland)", "Bluespot"];
+// Draw order, bottom to top -- split around where the analyzed-area
+// overlay sits (see ANALYZED_AREA_STYLE below): Opland/Bluespot/Selected
+// ID15 stay underneath it, the two stream layers stay on top of it, so
+// streams read as continuous across the AOI boundary and the AOI itself
+// still stays visible over Bluespot.
+const RESULT_LAYER_ORDER_BELOW_AOI = ["Selected ID15", "Opland", "Bluespot"];
+const RESULT_LAYER_ORDER_ABOVE_AOI = ["Vandveje (ID15)", "Vandveje (Opland)"];
 
-// The polygon that was actually submitted for analysis (a selected
-// Kloakoplande feature or a freehand drawing) needs to stay clearly
-// visible once results render on top of it. Rendered as its own
-// outline-only (no fill) copy, added last and pinned to the very top of
-// the stack, so the streams underneath stay fully visible -- only the
-// boundary line sits above everything. Magenta rather than the
-// Kloakoplande orange: that color's already used for the unselected plan
-// areas still visible underneath, so reusing it here would blend in
-// exactly where it needs to stand out.
-const ANALYZED_AREA_STYLE = { color: "#e6007e", weight: 3.5, fillOpacity: 0, dashArray: "8,4", interactive: false };
+// The polygon actually submitted for analysis (a selected Kloakoplande
+// feature or a freehand drawing) is styled as a cartographic AOI marker,
+// not another data layer -- solid black border, diagonal-hatch fill (see
+// initAoiHatchPattern) rather than a solid color. That's a deliberate
+// choice, not just matching the reference figure: black holds contrast
+// against both basemaps (colorful street map and photographic aerial
+// alike), whereas any other saturated color risks blending into one of
+// them; hachures are the standard cartographic convention for "extent of
+// analysis" precisely because they read as a structural frame rather
+// than a result. The hatch's open gaps keep the bluespot/opland fills
+// underneath visible; it sits below the two stream layers so their
+// channels stay unbroken crossing it, and above everything else so it
+// doesn't get swallowed by Bluespot's solid fill.
+const ANALYZED_AREA_STYLE = { color: "#000000", weight: 3, fillColor: "url(#aoi-hatch)", fillOpacity: 1, interactive: false };
 
-let map, kloakLayer, drawnLayer, drawControl;
+let map, kloakLayer, drawnLayer, drawControl, aoiRenderer;
 let selectedGeometry = null;
 let selectedLabel = null;
+let selectedAreaCode = null;
 let currentMode = "select";
 let resultLayers = {};
 let analyzedAreaLayer = null;
@@ -91,6 +101,38 @@ function initMap() {
   osmMain = makeOsmLayer().addTo(map);
   ortofotoMain = makeOrtofotoLayer();
   map.setView([55.913, 9.322], 14);
+}
+
+// The map renders vectors to a canvas (preferCanvas above) for
+// performance, but canvas can't do pattern fills -- only the AOI overlay
+// needs one, so it gets its own dedicated SVG renderer, with a diagonal-
+// hatch <pattern> injected into that renderer's own <svg> once up front.
+// ANALYZED_AREA_STYLE references it by id ("url(#aoi-hatch)"), the same
+// way any ordinary SVG fill color would be referenced.
+function initAoiHatchPattern() {
+  aoiRenderer = L.svg().addTo(map);
+  const svg = aoiRenderer._container;
+  const ns = "http://www.w3.org/2000/svg";
+
+  const pattern = document.createElementNS(ns, "pattern");
+  pattern.setAttribute("id", "aoi-hatch");
+  pattern.setAttribute("width", "8");
+  pattern.setAttribute("height", "8");
+  pattern.setAttribute("patternUnits", "userSpaceOnUse");
+  pattern.setAttribute("patternTransform", "rotate(45)");
+
+  const line = document.createElementNS(ns, "line");
+  line.setAttribute("x1", "0");
+  line.setAttribute("y1", "0");
+  line.setAttribute("x2", "0");
+  line.setAttribute("y2", "8");
+  line.setAttribute("stroke", "#000000");
+  line.setAttribute("stroke-width", "1.5");
+  pattern.appendChild(line);
+
+  const defs = document.createElementNS(ns, "defs");
+  defs.appendChild(pattern);
+  svg.insertBefore(defs, svg.firstChild);
 }
 
 function initBasemapToggle() {
@@ -185,7 +227,13 @@ async function loadKloakoplande() {
   kloakLayer = L.geoJSON(geojson, {
     style: () => ({ color: "#c2410c", weight: 1.5, fillColor: "#f97316", fillOpacity: 0.22 }),
     onEachFeature: (feature, layer) => {
-      layer.on("click", () => selectAreaFeature(feature, layer));
+      // Clicking the already-selected feature again deselects it, rather
+      // than being a one-way trip that only another selection can undo.
+      layer.on("click", () => {
+        if (isRunning) return;
+        if (feature.properties.navn1201 === selectedAreaCode) clearSelection();
+        else selectAreaFeature(feature, layer);
+      });
     },
   }).addTo(map);
 
@@ -207,6 +255,8 @@ function renderAreaList(codes, geojson) {
     li.dataset.code = code;
     li.innerHTML = `<span class="code">${code}</span><span class="status-dot" title="${feature.properties.status || ""}"></span>`;
     li.addEventListener("click", () => {
+      if (isRunning) return;
+      if (code === selectedAreaCode) { clearSelection(); return; }
       const layer = findKloakLayerByCode(code);
       if (layer) selectAreaFeature(feature, layer);
     });
@@ -234,10 +284,18 @@ function selectAreaFeature(feature, layer) {
 
   selectedGeometry = feature.geometry;
   selectedLabel = `Planområde ${feature.properties.navn1201}`;
+  selectedAreaCode = feature.properties.navn1201;
   updateSelectionUI();
 }
 
+// Also resets any Kloakoplande highlight -- covers both an explicit
+// deselect click and switching away from "select" mode, which previously
+// left the last-selected plan area visually highlighted even after its
+// selection no longer meant anything.
 function clearSelection() {
+  if (kloakLayer) kloakLayer.eachLayer((l) => kloakLayer.resetStyle(l));
+  document.querySelectorAll(".area-item").forEach((el) => el.classList.remove("is-selected"));
+  selectedAreaCode = null;
   selectedGeometry = null;
   selectedLabel = null;
   updateSelectionUI();
@@ -357,12 +415,23 @@ function applyStreamWidthScale() {
   });
 }
 
+// Re-pins the analyzed-area outline and the two stream layers back to
+// the front, in that order, after any legend checkbox re-adds a layer
+// (re-adding always puts it on top again, which would otherwise bury
+// whichever of these is supposed to stay above it).
+function reassertAoiAndStreamOrder() {
+  if (analyzedAreaLayer) analyzedAreaLayer.bringToFront();
+  RESULT_LAYER_ORDER_ABOVE_AOI.forEach((name) => {
+    if (resultLayers[name]) resultLayers[name].bringToFront();
+  });
+}
+
 function renderResults(layers, label, geometry) {
   clearResultLayers();
   const legend = document.getElementById("legend");
   document.getElementById("results-for").textContent = label;
 
-  RESULT_LAYER_ORDER.forEach((name) => {
+  function addResultLayer(name) {
     const geojson = layers[name];
     const style = RESULT_LAYER_STYLES[name];
     if (!geojson || !style) return;
@@ -404,23 +473,28 @@ function renderResults(layers, label, geometry) {
     li.querySelector("input").addEventListener("change", (e) => {
       if (e.target.checked) {
         layer.addTo(map);
-        // Re-adding a layer puts it on top again, which would otherwise
-        // bury the analyzed-area outline back under it.
-        if (analyzedAreaLayer) analyzedAreaLayer.bringToFront();
+        reassertAoiAndStreamOrder();
       } else {
         map.removeLayer(layer);
       }
     });
     legend.appendChild(li);
-  });
+  }
+
+  // Add order matters here (see RESULT_LAYER_ORDER_* comment above): the
+  // AOI overlay is created in between the two groups, so it naturally
+  // lands above Opland/Bluespot/Selected ID15 and below the streams
+  // without needing bringToFront() on the very first render.
+  RESULT_LAYER_ORDER_BELOW_AOI.forEach(addResultLayer);
 
   if (geometry) {
     analyzedAreaLayer = L.geoJSON(
       { type: "Feature", geometry, properties: {} },
-      { style: () => ANALYZED_AREA_STYLE }
+      { style: () => ANALYZED_AREA_STYLE, renderer: aoiRenderer }
     ).addTo(map);
-    analyzedAreaLayer.bringToFront();
   }
+
+  RESULT_LAYER_ORDER_ABOVE_AOI.forEach(addResultLayer);
 
   // Reflect the persisted scale in the slider itself, in case it was
   // adjusted on a previous run -- it shouldn't silently reset to 1 here.
@@ -491,6 +565,7 @@ async function runAnalysis() {
 
 function init() {
   initMap();
+  initAoiHatchPattern();
   initBasemapToggle();
   initDrawing();
   loadKloakoplande();
