@@ -17,7 +17,19 @@ directly.
 Importing this module before any `qgis`/`processing`/`pcraster` import sets
 up the same paths explicitly, so the pipeline no longer depends on how (or
 by what) it was launched -- only on which interpreter is running it
-(it must be `geo_env`'s own python.exe).
+(it must be `geo_env`'s own interpreter).
+
+Windows and Linux conda installs lay the same packages out differently, so
+the paths below are resolved per-platform:
+
+    Windows                          Linux
+    <env>/Library/                   <env>/
+    <env>/Library/python/            <env>/share/qgis/python/
+    <env>/Library/bin/  (DLLs)       <env>/lib/        (shared objects)
+    <env>/Library/share/gdal/        <env>/share/gdal/
+
+Everything below the first row is derived from it, so the platform
+difference is confined to `_platform_paths()`.
 
 Usage: put `import env_bootstrap` as the very first import in any script
 that (directly or indirectly, e.g. via importing CatchmentRunoff) ends up
@@ -29,6 +41,37 @@ import sys
 _done = False
 
 
+def _posix(path):
+    """QGIS/GDAL env vars want forward slashes, including on Windows."""
+    return path.replace(os.sep, "/")
+
+
+def _platform_paths(env_root):
+    """Return (qgis_root, qgis_python_dir, native_lib_dirs) for this OS.
+
+    `qgis_root` is what QGIS_PREFIX_PATH must point at, and the parent of
+    the shared `share/gdal` + `share/proj` data directories.
+    """
+    if os.name == "nt":
+        qgis_root = os.path.join(env_root, "Library")
+        return (
+            qgis_root,
+            os.path.join(qgis_root, "python"),
+            (
+                os.path.join(qgis_root, "bin"),
+                os.path.join(qgis_root, "mingw-w64", "bin"),
+            ),
+        )
+
+    # Linux (and macOS) conda: no Library/ level, and QGIS's python bindings
+    # ship under share/qgis rather than beside the libraries.
+    return (
+        env_root,
+        os.path.join(env_root, "share", "qgis", "python"),
+        (os.path.join(env_root, "lib"),),
+    )
+
+
 def _setup():
     global _done
     if _done:
@@ -36,17 +79,15 @@ def _setup():
     _done = True
 
     env_root = sys.prefix
-    library_dir = os.path.join(env_root, "Library")
-    qgis_python_dir = os.path.join(library_dir, "python")
+    qgis_root, qgis_python_dir, native_lib_dirs = _platform_paths(env_root)
     qgis_plugins_dir = os.path.join(qgis_python_dir, "plugins")
-    lib_bin_dir = os.path.join(library_dir, "bin")
-    mingw_bin_dir = os.path.join(library_dir, "mingw-w64", "bin")
 
     if not os.path.isdir(qgis_python_dir):
+        interpreter = "python.exe" if os.name == "nt" else "python"
         raise RuntimeError(
             f"Expected QGIS's python bindings at {qgis_python_dir!r} but that "
             f"folder doesn't exist. This assumes the running interpreter is "
-            f"the 'geo_env' conda environment's own python.exe -- current "
+            f"the 'geo_env' conda environment's own {interpreter} -- current "
             f"interpreter is {sys.executable!r}. Select the geo_env "
             f"interpreter and try again."
         )
@@ -55,7 +96,7 @@ def _setup():
         if path not in sys.path:
             sys.path.insert(0, path)
 
-    os.environ.setdefault("QGIS_PREFIX_PATH", library_dir.replace("\\", "/"))
+    os.environ.setdefault("QGIS_PREFIX_PATH", _posix(qgis_root))
 
     # Without these, GDAL/pyogrio can't find their own bundled data files
     # (warns "Could not detect GDAL data files") and PROJ falls back to
@@ -63,22 +104,31 @@ def _setup():
     # machine -- exactly the kind of cross-environment leak this module
     # exists to prevent. PROJ_DATA (not PROJ_LIB) is the current name;
     # PROJ_LIB is deprecated.
-    gdal_data_dir = os.path.join(library_dir, "share", "gdal")
-    proj_data_dir = os.path.join(library_dir, "share", "proj")
+    gdal_data_dir = os.path.join(qgis_root, "share", "gdal")
+    proj_data_dir = os.path.join(qgis_root, "share", "proj")
     if os.path.isdir(gdal_data_dir):
-        os.environ.setdefault("GDAL_DATA", gdal_data_dir.replace("\\", "/"))
+        os.environ.setdefault("GDAL_DATA", _posix(gdal_data_dir))
     if os.path.isdir(proj_data_dir):
-        os.environ.setdefault("PROJ_DATA", proj_data_dir.replace("\\", "/"))
+        os.environ.setdefault("PROJ_DATA", _posix(proj_data_dir))
 
     if hasattr(os, "add_dll_directory"):
-        for dll_dir in (lib_bin_dir, mingw_bin_dir):
+        for dll_dir in native_lib_dirs:
             if os.path.isdir(dll_dir):
                 os.add_dll_directory(dll_dir)
 
-    # add_dll_directory alone isn't enough for pcraster: some of the DLLs it
-    # depends on (its mingw runtime) are only found via PATH.
+    # Windows: add_dll_directory alone isn't enough for pcraster -- some of
+    # the DLLs it depends on (its mingw runtime) are only found via PATH.
+    # Linux: conda's shared objects are located via RPATH, so lib/ does not
+    # belong on PATH; what we want there is the env's bin/, so any pcraster
+    # or GDAL command line tool the pipeline shells out to resolves to this
+    # environment's copy rather than a system-wide one.
+    if os.name == "nt":
+        path_prefix_dirs = native_lib_dirs
+    else:
+        path_prefix_dirs = (os.path.join(env_root, "bin"),)
+
     os.environ["PATH"] = os.pathsep.join(
-        p for p in (lib_bin_dir, mingw_bin_dir, os.environ.get("PATH", "")) if p
+        p for p in (*path_prefix_dirs, os.environ.get("PATH", "")) if p
     )
 
 

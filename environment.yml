@@ -1,0 +1,44 @@
+# Conda environment for the oplands-screener pipeline and API.
+#
+#   conda env create -f environment.yml
+#   conda activate geo_env
+#
+# Versions below are the ones actually running on the developer's Windows
+# machine, read out of that environment rather than chosen from docs -- the
+# point of this file is that the Linux server runs the same geoprocessing
+# stack, not merely a working one. GDAL/PROJ/QGIS behaviour differs enough
+# between minor versions to change analysis output, so the geo stack is
+# pinned exactly.
+#
+# Deliberately NOT pinned: numpy, pandas, shapely, pyogrio and the rest of
+# the scientific stack. They are pulled in as dependencies of qgis/geopandas
+# anyway, and pinning them exactly on top of an exact qgis pin tends to make
+# the solve unsatisfiable on a different platform for no real benefit.
+#
+# Build strings are omitted throughout -- they are platform-specific
+# (py312hcae2392_0 is a win-64 build), so including them would guarantee
+# this file fails on linux-64.
+
+name: geo_env
+
+channels:
+  - conda-forge
+  - nodefaults
+
+dependencies:
+  - python=3.12
+
+  # --- geoprocessing stack: pinned exactly, see note above ---
+  - qgis=3.44.11
+  - pcraster=4.4.3
+  - gdal=3.13.3
+  - proj=9.8.1
+  - geopandas=1.1.4
+
+  # --- API layer ---
+  # Mirrors backend/requirements.txt. Installed via pip because these are
+  # not part of the geo stack and conda-forge lags pip on FastAPI releases.
+  - pip
+  - pip:
+      - fastapi==0.141.1
+      - uvicorn[standard]==0.52.4
