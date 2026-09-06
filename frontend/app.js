@@ -294,7 +294,7 @@ function selectAreaFeature(feature, layer) {
   });
 
   selectedGeometry = feature.geometry;
-  selectedLabel = `Planområde ${feature.properties.navn1201}`;
+  selectedLabel = `Kloakområde ${feature.properties.navn1201}`;
   selectedAreaCode = feature.properties.navn1201;
   updateSelectionUI();
 }
