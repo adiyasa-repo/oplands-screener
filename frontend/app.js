@@ -624,6 +624,27 @@ function init() {
   });
 
   initExportButton();
+  initFeedbackLink();
+}
+
+// The feedback address is a <button>, not a plain mailto: <a>, and
+// assembled here rather than written out anywhere as a literal string --
+// see the comment on .feedback-link in style.css. This defeats a plain
+// regex scraper reading the shipped HTML/JS files (still the common case
+// for address-harvesting bots, since running a full browser per page is
+// expensive at scale) but not a bot that executes JavaScript and
+// simulates a real click: nothing client-side can stop that, since the
+// browser itself has to see the real address to open a mail client. It
+// raises the bar, it doesn't remove it.
+function initFeedbackLink() {
+  const btn = document.getElementById("feedback-link");
+  if (!btn) return;
+  const user = ["a", "l", "e", "x", "a", "n", "d", "e", "r"].join("");
+  const domain = ["a", "d", "i", "y", "a", "s", "a", ".", "d", "k"].join("");
+  btn.addEventListener("click", () => {
+    const subject = encodeURIComponent("Feedback: Oplands-screener");
+    window.location.href = `mailto:${user}@${domain}?subject=${subject}`;
+  });
 }
 
 // Export isn't built yet -- this just states, in writing, what the button

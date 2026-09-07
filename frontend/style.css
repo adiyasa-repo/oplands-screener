@@ -408,17 +408,26 @@ html, body {
 
 .sidebar-spacer { flex: 1; }
 
-.sidebar-footer a {
+/* A <button>, not an <a href="mailto:...">, on purpose: an anchor would
+   have to carry the real address as a static string in the shipped HTML.
+   This just needs to look identical -- see initFeedbackLink() in app.js
+   for where the address actually gets assembled. */
+.sidebar-footer .feedback-link {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  font: inherit;
   font-size: 12.5px;
   color: var(--text-muted);
-  text-decoration: none;
-  padding-top: 8px;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 8px 0 0;
   border-top: 1px solid var(--border);
+  cursor: pointer;
 }
-.sidebar-footer a:hover { color: var(--accent); }
+.sidebar-footer .feedback-link:hover { color: var(--accent); }
 
 .is-hidden { display: none !important; }
 
