@@ -39,12 +39,17 @@ const RESULT_LAYER_STYLES = {
 };
 
 // Draw order, bottom to top -- split around where the analyzed-area
-// overlay sits (see ANALYZED_AREA_STYLE below): Opland/Bluespot/Selected
-// ID15 stay underneath it, the two stream layers stay on top of it, so
-// streams read as continuous across the AOI boundary and the AOI itself
-// still stays visible over Bluespot.
-const RESULT_LAYER_ORDER_BELOW_AOI = ["Selected ID15", "Opland", "Bluespot"];
-const RESULT_LAYER_ORDER_ABOVE_AOI = ["Vandveje (ID15)", "Vandveje (Opland)"];
+// overlay sits (see ANALYZED_AREA_STYLE below): Opland/Selected ID15 stay
+// underneath it; the two stream layers and Bluespot stay on top of it, in
+// that order, so streams read as continuous across the AOI boundary and
+// Bluespot -- the top layer of the whole map -- is never broken up by
+// either the streams or the AOI hatch crossing it.
+//
+// Note the AOI's black hachure border can now be covered by Bluespot's
+// solid fill wherever the two overlap, since Bluespot sits above it here
+// -- a deliberate tradeoff for putting Bluespot on top, not an oversight.
+const RESULT_LAYER_ORDER_BELOW_AOI = ["Selected ID15", "Opland"];
+const RESULT_LAYER_ORDER_ABOVE_AOI = ["Vandveje (ID15)", "Vandveje (Opland)", "Bluespot"];
 
 // The polygon actually submitted for analysis (a selected Kloakoplande
 // feature or a freehand drawing) is styled as a cartographic AOI marker,
@@ -55,10 +60,12 @@ const RESULT_LAYER_ORDER_ABOVE_AOI = ["Vandveje (ID15)", "Vandveje (Opland)"];
 // alike), whereas any other saturated color risks blending into one of
 // them; hachures are the standard cartographic convention for "extent of
 // analysis" precisely because they read as a structural frame rather
-// than a result. The hatch's open gaps keep the bluespot/opland fills
-// underneath visible; it sits below the two stream layers so their
-// channels stay unbroken crossing it, and above everything else so it
-// doesn't get swallowed by Bluespot's solid fill.
+// than a result. The hatch's open gaps keep the Opland fill underneath
+// visible; it sits above Opland/Selected ID15 but below the two stream
+// layers and Bluespot, so streams stay unbroken crossing it and Bluespot
+// -- the top layer of the whole map -- is never broken up by it either.
+// The tradeoff: the hatch's own black border can get covered by
+// Bluespot's solid fill wherever the two overlap.
 const ANALYZED_AREA_STYLE = { color: "#000000", weight: 3, fillColor: "url(#aoi-hatch)", fillOpacity: 1, interactive: false };
 
 let map, kloakLayer, drawnLayer, drawControl, aoiRenderer;
@@ -426,10 +433,10 @@ function applyStreamWidthScale() {
   });
 }
 
-// Re-pins the analyzed-area outline and the two stream layers back to
-// the front, in that order, after any legend checkbox re-adds a layer
-// (re-adding always puts it on top again, which would otherwise bury
-// whichever of these is supposed to stay above it).
+// Re-pins the analyzed-area outline, the two stream layers, and Bluespot
+// back to the front, in that order, after any legend checkbox re-adds a
+// layer (re-adding always puts it on top again, which would otherwise
+// bury whichever of these is supposed to stay above it).
 function reassertAoiAndStreamOrder() {
   if (analyzedAreaLayer) analyzedAreaLayer.bringToFront();
   RESULT_LAYER_ORDER_ABOVE_AOI.forEach((name) => {
