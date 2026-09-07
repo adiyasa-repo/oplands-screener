@@ -358,6 +358,10 @@ function setMode(mode) {
   clearSelection();
   if (mode === "select") {
     drawControl && drawControl.disable();
+    // Re-entering select mode -- including re-clicking the tab while
+    // already on it -- always brings the plan-area list back, so
+    // collapsing it after a run (see renderResults) is never a dead end.
+    document.querySelector('.mode-panel[data-mode-panel="select"]').classList.remove("is-collapsed");
   }
 }
 
@@ -522,6 +526,17 @@ function renderResults(layers, label, geometry) {
 
   document.getElementById("results-panel").classList.remove("is-hidden");
 
+  // Once there's a preselected polygon's results to look at, the plan-area
+  // list (search box + the whole scrollable Vælg et kloakområde list) has
+  // done its job and just eats vertical space -- collapsing it is what
+  // gives the stream-width slider real presence without scrolling. Draw
+  // mode already gets this for free (its panel is just two buttons, far
+  // shorter than the list to begin with), which is why only select mode
+  // needs the collapse triggered explicitly.
+  if (currentMode === "select") {
+    document.querySelector('.mode-panel[data-mode-panel="select"]').classList.add("is-collapsed");
+  }
+
   const oplandLayer = resultLayers["Opland"];
   if (oplandLayer) map.fitBounds(oplandLayer.getBounds(), { padding: [60, 60] });
 }
@@ -606,6 +621,40 @@ function init() {
     streamWidthScale = Number(e.target.value);
     document.getElementById("stream-width-value").textContent = `${streamWidthScale.toFixed(1)}×`;
     applyStreamWidthScale();
+  });
+
+  initExportButton();
+}
+
+// Export isn't built yet -- this just states, in writing, what the button
+// will eventually do, rather than leaving a mystery icon with no
+// explanation. Toggling on click (not hover) matches how every other
+// dismissible element in this UI behaves (the toast, the status card),
+// and closes the same ways a user would expect: clicking the button
+// again, clicking anywhere else, or Escape.
+function initExportButton() {
+  const btn = document.getElementById("export-btn");
+  const popover = document.getElementById("export-popover");
+
+  function setOpen(open) {
+    popover.classList.toggle("is-hidden", !open);
+    btn.classList.toggle("is-active", open);
+    btn.setAttribute("aria-expanded", open);
+  }
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setOpen(popover.classList.contains("is-hidden"));
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!popover.classList.contains("is-hidden") && !popover.contains(e.target)) {
+      setOpen(false);
+    }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") setOpen(false);
   });
 }
 

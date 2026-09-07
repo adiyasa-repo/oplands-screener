@@ -138,6 +138,11 @@ html, body {
 
 .mode-panel.is-hidden { display: none; }
 
+/* Separate from .is-hidden (which mode-switching alone drives) -- this
+   toggles independently, off after a run on a preselected area, back on
+   the moment the user re-clicks "Vælg et kloakområde" (see setMode). */
+.mode-panel.is-collapsed { display: none; }
+
 .search-row {
   position: relative;
   margin-bottom: 10px;
@@ -516,6 +521,138 @@ html, body {
   font-weight: 500;
   max-width: 70%;
   z-index: 1100;
+}
+
+/* Export button -- top-right of the map, the one corner the zoom control
+   (bottomright) and basemap toggle (bottomleft) leave free. Not yet
+   functional: the whole site's premise is "specify a polygon, get
+   results, export them" -- the button's placement states that intent
+   permanently, before the feature itself exists, rather than appearing
+   only once export is built. */
+.export-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 500;
+  padding: 0;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.export-btn svg { width: 19px; height: 19px; }
+.export-btn:hover {
+  transform: scale(1.06);
+  box-shadow: var(--shadow-lg);
+  color: var(--accent);
+}
+.export-btn.is-active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.export-popover {
+  position: absolute;
+  top: 68px;
+  right: 16px;
+  width: 250px;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 14px 16px;
+  z-index: 500;
+  animation: export-popover-in 0.14s ease;
+}
+.export-popover-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.export-popover-text {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin: 0;
+}
+
+/* A preview of formats that will eventually sit behind this button --
+   not interactive (nothing here works yet), styled quieter than the
+   note above it so it reads as "here's what's coming", not as a working
+   menu the note above is warning you about. */
+.export-formats {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 10px 0 0;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.export-format {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-muted);
+  cursor: default;
+}
+.export-format svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+.export-format span {
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+/* A second, distinctly-styled teaser below the format list -- title +
+   subtext, matching the popover's own title/note pattern above, rather
+   than another compact icon+label row. Deliberate: this isn't an output
+   format of an existing result like the three above it, it's a whole
+   different way of running the tool (mail in, get a result back), so it
+   needs its own explanation rather than a self-explanatory one-word
+   label -- the visual weight signals "this is a bigger thing", not just
+   a fourth format in the list. */
+.export-agent {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.export-agent-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--text-faint);
+}
+.export-agent-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 3px;
+}
+.export-agent-text {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin: 0;
+}
+
+@keyframes export-popover-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @media (max-width: 760px) {
