@@ -4,7 +4,8 @@ import pcraster as pcr
 import subprocess
 import time
 import os
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, MultiPolygon
+from shapely.ops import unary_union
 from osgeo import osr
 from qgis.core import (
     QgsCoordinateReferenceSystem,
@@ -85,12 +86,43 @@ def downstream(ldd_raster_path, channels_raster_path):
     print_step_time("downstream operation", start_time)
     return downstream_raster
 
+# Strips interior holes from a dissolved union result, preserving every
+# disjoint part rather than assuming the geometry is a single simple
+# Polygon. union_all() only returns a plain Polygon when everything
+# happens to touch into one continuous shape -- a genuinely split
+# catchment (parts that only touch at a point, or don't touch at all) is
+# a real result, not an error condition, and downstream GDAL cutline
+# cropping (see CatchmentRunoff.py's masking step) handles a MultiPolygon
+# natively, so there's no reason to collapse it down to "largest part
+# only" and silently discard real catchment area. Found and fixed after
+# this crashed in production on a real Kloakområde selection whose
+# dissolved catchment came back as a MultiPolygon -- the plain-Polygon
+# assumption had gone untested against real-world upstream geometry
+# until the WFS-based area picker made that a normal case rather than a
+# rare one.
+def _exterior_only(geom):
+    if geom.geom_type == "Polygon":
+        return Polygon(geom.exterior)
+    if geom.geom_type == "MultiPolygon":
+        return MultiPolygon([Polygon(part.exterior) for part in geom.geoms])
+    if geom.geom_type == "GeometryCollection":
+        # A messy union (e.g. polygons that also share only an edge or a
+        # point somewhere) can produce a mix of geometry types. The
+        # non-polygonal ones (stray points/lines along a shared boundary)
+        # carry no catchment area, so drop them rather than fail on them.
+        polygonal = [g for g in geom.geoms if g.geom_type in ("Polygon", "MultiPolygon")]
+        if not polygonal:
+            raise ValueError(f"No polygonal geometry in union result (got {geom.geom_type})")
+        return _exterior_only(unary_union(polygonal))
+    raise ValueError(f"Unexpected geometry type from union_all(): {geom.geom_type}")
+
+
 # Function to dissolve polygons without holes
 def dissolve_polygon(input_path, output_path, verbose=True):
     start_time = record_time()
     input_polygon = gpd.read_file(input_path)
     dissolved_polygon = input_polygon.union_all()
-    dissolved_polygon = Polygon(dissolved_polygon.exterior)
+    dissolved_polygon = _exterior_only(dissolved_polygon)
     gpd.GeoDataFrame(geometry=[dissolved_polygon]).to_file(output_path)
     if verbose:
         print_step_time("dissolve polygons", start_time)
