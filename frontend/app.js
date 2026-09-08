@@ -19,11 +19,11 @@ const API_BASE = (location.hostname === "localhost" || location.hostname === "12
 //
 // interactive:false on every one of these: none of them have a click
 // handler or popup, so leaving them clickable only caused harm -- once
-// any of these render on top of the Kloakoplande layer, they'd silently
-// swallow clicks meant for whatever plan-area polygon is underneath.
+// any of these render on top of the selectable reference layers (see
+// REFERENCE_LAYER_STYLES below), they'd silently swallow clicks meant for
+// whatever shape is underneath.
 const RESULT_LAYER_STYLES = {
   "Opland": { color: "#082f3a", weight: 3, fillColor: "#0a4a5c", fillOpacity: 0.22, kind: "polygon", interactive: false },
-  "Selected ID15": { color: "#6b7280", weight: 1.5, dashArray: "5,4", fillOpacity: 0, kind: "polygon", interactive: false },
   "Bluespot": { color: "#1e40af", weight: 0, fillColor: "#1e40af", fillOpacity: 0.55, kind: "polygon", interactive: false },
   // Point layers: circle radius scales with each point's own sampled flow-
   // accumulation value (the "resampled_1" field QGIS's own graduated-size
@@ -63,7 +63,7 @@ const RESULT_LAYER_STYLES = {
 // Below AOI's line -- among the layers that DO share one real canvas --
 // this list means exactly what it looks like: Bluespot last, so it's the
 // single topmost thing this app ever draws.
-const MAP_LAYER_ORDER = ["AOI", "Selected ID15", "Opland", "Vandveje (ID15)", "Vandveje (Opland)", "Bluespot"];
+const MAP_LAYER_ORDER = ["AOI", "Opland", "Vandveje (ID15)", "Vandveje (Opland)", "Bluespot"];
 
 // The polygon actually submitted for analysis (a selected reference-layer
 // feature or a freehand drawing) is styled as a cartographic AOI marker,
@@ -651,25 +651,38 @@ function init() {
 // design, a click-to-select model doesn't need every feature loaded at
 // once anyway, only whatever's currently visible.
 //
-// Two services, two real coordinate-order gotchas -- both found by
-// testing, not assumed, so documented here rather than left to bite
-// again:
-//   - Dataforsyningen's jordstykker `polygon` param wants ordinary
-//     [lon,lat] pairs, same order as GeoJSON.
-//   - Plandata's WFS native `BBOX` param wants [lat,lon,lat,lon] --
-//     backwards from GeoJSON. A [lon,lat] bbox doesn't error, it just
-//     silently matches zero features, which is a much easier mistake to
-//     miss than an outright failure.
-//   - Plandata's geometry column is literally named "geometri" (not the
-//     usual geom/the_geom) -- and PROPERTYNAME must list it explicitly,
-//     since GeoServer only includes attributes you name once that
-//     parameter is present at all; leaving it out silently drops the
-//     geometry too, not just the extra attributes.
-
+// Three separate GeoServer-backed services, all sharing the same real
+// coordinate-order gotcha -- found by testing, not assumed, so documented
+// here rather than left to bite again: their native WFS `BBOX` param
+// wants [lat,lon,lat,lon], backwards from GeoJSON. A [lon,lat] bbox
+// doesn't error, it just silently matches zero features, which is a much
+// easier mistake to miss than an outright failure -- confirmed on both
+// Plandata's and Landbrugsstyrelsen's servers independently, so this
+// looks like a general WFS 2.0/GeoServer convention, not a one-off
+// quirk of either. fetchGeoServerLayer below centralizes that swap once,
+// rather than risk it being silently wrong the next time a layer like
+// this gets added. Dataforsyningen's jordstykker `polygon` param is the
+// one exception -- it wants ordinary [lon,lat] pairs, same as GeoJSON.
+//
+// Plandata's geometry column is also literally named "geometri" (not the
+// usual geom/the_geom), and PROPERTYNAME must list it explicitly, since
+// GeoServer only includes attributes you name once that parameter is
+// present at all -- leaving it out silently drops the geometry too, not
+// just the extra attributes. ID15oplande's schema is small enough (3
+// plain fields) that trimming isn't worth it there.
+//
+// Not every layer here is selectable -- see the "interactive: false"
+// entries below (ID15oplande, from Landbrugsstyrelsen/geodata-info.dk:
+// https://geodata-info.dk/srv/eng/catalog.search#/metadata/b198f45a-8d93-4810-9dda-35921b27e0b3).
+// That single flag does double duty: Leaflet's own meaning (no hover/
+// click affordance) AND, in refreshReferenceLayer below, whether this
+// app's own click-to-select handler gets attached at all -- one flag,
+// not two parallel ones that could drift out of sync.
 const REFERENCE_LAYER_STYLES = {
   jordstykker: { color: "#94a3b8", weight: 1, fillOpacity: 0.03 },
   kloakomrader: { color: "#b45309", weight: 1.4, dashArray: "4,3", fillOpacity: 0.05 },
   lokalplanomrader: { color: "#7e22ce", weight: 1.4, dashArray: "4,3", fillOpacity: 0.05 },
+  id15: { color: "#15803d", weight: 1.5, fillOpacity: 0, interactive: false },
 };
 
 // A cap, not a hard limit the UI hides -- if a fetch comes back at exactly
@@ -677,11 +690,11 @@ const REFERENCE_LAYER_STYLES = {
 // under that layer's checkbox says so rather than silently truncating.
 const REFERENCE_LAYER_MAX_FEATURES = 300;
 
-let referenceLayers = { jordstykker: null, kloakomrader: null, lokalplanomrader: null };
+let referenceLayers = { jordstykker: null, kloakomrader: null, lokalplanomrader: null, id15: null };
 // Bumped on every fetch kicked off for a given layer, so a slow older
 // request can recognize it's stale (a newer pan already superseded it)
 // and discard its result instead of clobbering what's now on screen.
-let referenceLayerRequestId = { jordstykker: 0, kloakomrader: 0, lokalplanomrader: 0 };
+let referenceLayerRequestId = { jordstykker: 0, kloakomrader: 0, lokalplanomrader: 0, id15: 0 };
 
 function boundsToLonLatRing(bounds) {
   const sw = bounds.getSouthWest();
@@ -703,26 +716,33 @@ async function fetchJordstykker(bounds) {
   return res.json();
 }
 
-async function fetchPlandataLayer(typeName, bounds) {
+async function fetchGeoServerLayer(baseUrl, typeName, bounds, propertyNames) {
   const sw = bounds.getSouthWest();
   const ne = bounds.getNorthEast();
   const bbox = `${sw.lat},${sw.lng},${ne.lat},${ne.lng},urn:ogc:def:crs:EPSG::4326`;
-  const url = "https://geoserver.plandata.dk/geoserver/wfs?" + new URLSearchParams({
+  const params = {
     service: "WFS", version: "2.0.0", request: "GetFeature",
-    typeName: `pdk:${typeName}`, outputFormat: "application/json",
+    typeName, outputFormat: "application/json",
     srsName: "EPSG:4326", BBOX: bbox,
-    PROPERTYNAME: "geometri,plannavn,plannr",
     count: String(REFERENCE_LAYER_MAX_FEATURES),
-  });
+  };
+  if (propertyNames) params.PROPERTYNAME = propertyNames;
+  const url = `${baseUrl}?` + new URLSearchParams(params);
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${typeName}: ${res.status}`);
   return res.json();
 }
 
+const PLANDATA_WFS = "https://geoserver.plandata.dk/geoserver/wfs";
+const LANDBRUGSSTYRELSEN_WFS = "https://geodata.fvm.dk/geoserver/Vandprojekter/wfs";
+
 const REFERENCE_LAYER_FETCHERS = {
   jordstykker: (bounds) => fetchJordstykker(bounds),
-  kloakomrader: (bounds) => fetchPlandataLayer("theme_pdk_kloakopland_vedtaget", bounds),
-  lokalplanomrader: (bounds) => fetchPlandataLayer("theme_pdk_lokalplan_vedtaget", bounds),
+  kloakomrader: (bounds) =>
+    fetchGeoServerLayer(PLANDATA_WFS, "pdk:theme_pdk_kloakopland_vedtaget", bounds, "geometri,plannavn,plannr"),
+  lokalplanomrader: (bounds) =>
+    fetchGeoServerLayer(PLANDATA_WFS, "pdk:theme_pdk_lokalplan_vedtaget", bounds, "geometri,plannavn,plannr"),
+  id15: (bounds) => fetchGeoServerLayer(LANDBRUGSSTYRELSEN_WFS, "Vandprojekter:ID15oplande", bounds),
 };
 
 function setReferenceLayerNote(key, text) {
@@ -751,11 +771,18 @@ async function refreshReferenceLayer(key) {
     if (key === selectedLayerKey) return; // got selected while the fetch was in flight
 
     if (referenceLayers[key]) map.removeLayer(referenceLayers[key]);
+    // interactive:false (see the comment on REFERENCE_LAYER_STYLES) means
+    // this layer is background-only -- e.g. ID15oplande -- so skip
+    // attaching the click-to-select handler entirely rather than attach
+    // it and rely on Leaflet alone to suppress the click.
+    const selectable = REFERENCE_LAYER_STYLES[key].interactive !== false;
     const layer = L.geoJSON(geojson, {
       style: () => REFERENCE_LAYER_STYLES[key],
-      onEachFeature: (feature, featureLayer) => {
-        featureLayer.on("click", () => selectReferenceFeature(key, feature, featureLayer));
-      },
+      onEachFeature: selectable
+        ? (feature, featureLayer) => {
+            featureLayer.on("click", () => selectReferenceFeature(key, feature, featureLayer));
+          }
+        : undefined,
     });
     layer.addTo(map);
     referenceLayers[key] = layer;

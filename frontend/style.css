@@ -632,6 +632,7 @@ html, body {
   flex-shrink: 0;
 }
 .layers-name { font-size: 13px; font-weight: 500; }
+.layers-name-hint { font-weight: 400; color: var(--text-faint); }
 .layers-note {
   display: block;
   font-size: 11px;

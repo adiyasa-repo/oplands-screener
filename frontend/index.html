@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-<link rel="stylesheet" href="style.css?v=11">
+<link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
 
@@ -35,7 +35,7 @@
       </div>
 
       <div class="mode-panel" data-mode-panel="select">
-        <p class="hint">Vælg et lag, og klik derefter en form på kortet for at bruge den som dit analyseområde.</p>
+        <p class="hint">Vælg et lag, og klik derefter en form på kortet for at bruge den som dit analyseområde. ID15-oplande vises kun som baggrund.</p>
         <ul class="layers-list" id="layers-list">
           <li class="layers-item">
             <label>
@@ -60,6 +60,14 @@
               <span class="layers-name">Lokalplanområder</span>
             </label>
             <span class="layers-note is-hidden" data-note="lokalplanomrader"></span>
+          </li>
+          <li class="layers-item">
+            <label>
+              <input type="checkbox" data-layer="id15">
+              <span class="layers-swatch" style="border-color:#15803d"></span>
+              <span class="layers-name">ID15-oplande <span class="layers-name-hint">(baggrund)</span></span>
+            </label>
+            <span class="layers-note is-hidden" data-note="id15"></span>
           </li>
         </ul>
       </div>
@@ -159,6 +167,6 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
-<script src="app.js?v=23"></script>
+<script src="app.js?v=24"></script>
 </body>
 </html>

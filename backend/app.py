@@ -17,6 +17,7 @@ that's also the interpreter used to launch each job's subprocess)
 import os
 import sys
 import json
+import time
 import uuid
 import threading
 import subprocess
@@ -56,6 +57,50 @@ app.add_middleware(
 # Anyone else gets told to wait rather than queued.
 _lock = threading.Lock()
 _jobs: Dict[str, Dict[str, Any]] = {}
+# When each job started, kept separately rather than as a field inside the
+# job dict itself -- that dict is returned to the client as-is from
+# GET /jobs/{id}, and an internal timestamp has no business leaking into
+# that response.
+_job_created: Dict[str, float] = {}
+
+# _jobs never had anything removed from it, so every result ever computed
+# -- full GeoJSON layers included, tens of thousands of features per job
+# -- stayed resident in memory for the server's entire uptime. Confirmed
+# on the live server, not a hypothetical: a few days of ordinary testing
+# alone reached 2.3GB resident on a 4GB box while completely idle. The
+# matching geometry/result files under JOBS_DIR had the same problem on
+# disk (261MB across 29 jobs at the time this was found).
+#
+# A single job here takes 30-60+ seconds and the concurrency guard above
+# already limits this app to one at a time, so realistic job throughput
+# is at most ~100/hour even under nonstop use -- an hour's worth of
+# results is a generous window for any client to still be polling a job
+# it started, and short enough that ordinary testing/demo use can no
+# longer accumulate without bound the way it did before.
+_JOB_TTL_SECONDS = 60 * 60
+
+
+def _evict_old_jobs():
+    """Drops any job -- in-memory result and its on-disk geometry/result
+    files -- older than _JOB_TTL_SECONDS. Called opportunistically from
+    /analyze rather than on a timer: this app already funnels every job
+    through that one endpoint under the hard concurrency lock, so a call
+    from there happens exactly as often as eviction could ever matter,
+    without needing a second execution context (a background thread/timer)
+    competing with the same event loop for no real benefit.
+    """
+    now = time.time()
+    expired = [jid for jid, created in _job_created.items() if now - created > _JOB_TTL_SECONDS]
+    for jid in expired:
+        _jobs.pop(jid, None)
+        _job_created.pop(jid, None)
+        for suffix in ("_geometry.json", "_result.json"):
+            path = os.path.join(JOBS_DIR, f"{jid}{suffix}")
+            if os.path.isfile(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
 
 
 # --- Basemap tile proxy --------------------------------------------------
@@ -167,8 +212,11 @@ def analyze(body: dict):
             detail="En analyse kører allerede. Vent til den er færdig, og prøv igen.",
         )
 
+    _evict_old_jobs()
+
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {"status": "running"}
+    _job_created[job_id] = time.time()
     threading.Thread(target=_run_job, args=(job_id, geometry), daemon=True).start()
     return {"job_id": job_id}
 
