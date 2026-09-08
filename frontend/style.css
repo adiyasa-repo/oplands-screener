@@ -140,86 +140,8 @@ html, body {
 
 /* Separate from .is-hidden (which mode-switching alone drives) -- this
    toggles independently, off after a run on a preselected area, back on
-   the moment the user re-clicks "Vælg et kloakområde" (see setMode). */
+   the moment the user re-clicks "Vælg på kortet" (see setMode). */
 .mode-panel.is-collapsed { display: none; }
-
-.search-row {
-  position: relative;
-  margin-bottom: 10px;
-}
-
-.search-icon {
-  position: absolute;
-  left: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 15px;
-  height: 15px;
-  color: var(--text-faint);
-  pointer-events: none;
-}
-
-#area-search {
-  width: 100%;
-  font: inherit;
-  font-size: 13px;
-  padding: 8px 10px 8px 32px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
-}
-#area-search:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-.area-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-height: 260px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.area-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 9px 10px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 13px;
-  border: 1px solid transparent;
-  transition: background 0.12s ease, border-color 0.12s ease;
-}
-
-.area-item:hover {
-  background: var(--surface);
-}
-
-.area-item.is-selected {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-}
-
-.area-item .code {
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.area-item .status-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #22c55e;
-  flex-shrink: 0;
-}
 
 .hint {
   font-size: 12.5px;
@@ -314,7 +236,7 @@ html, body {
   margin-bottom: 10px;
 }
 
-.area-list.is-locked {
+.layers-list.is-locked {
   pointer-events: none;
   opacity: 0.5;
 }
@@ -676,6 +598,45 @@ html, body {
 @keyframes export-popover-in {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* The area picker -- these ARE the analysis-area selector now, not a
+   passive background layer (see the comment above REFERENCE_LAYER_STYLES
+   in app.js for why). Lives directly in the sidebar's "select" mode
+   panel, immediately below the .hint paragraph, so no floating
+   button/popover positioning is needed here the way the export button
+   still needs it. */
+.layers-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.layers-item label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  user-select: none;
+}
+.layers-item input[type="checkbox"] { accent-color: var(--accent); }
+.layers-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 2px solid;
+  background: transparent;
+  flex-shrink: 0;
+}
+.layers-name { font-size: 13px; font-weight: 500; }
+.layers-note {
+  display: block;
+  font-size: 11px;
+  color: var(--text-faint);
+  margin: 3px 0 0 21px;
 }
 
 @media (max-width: 760px) {

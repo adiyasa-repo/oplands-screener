@@ -38,20 +38,34 @@ const RESULT_LAYER_STYLES = {
   "Vandveje (ID15)": { color: "#60a5fa", kind: "point", valueField: "resampled_1", minRadius: 1, maxRadius: 11 },
 };
 
-// Draw order, bottom to top -- split around where the analyzed-area
-// overlay sits (see ANALYZED_AREA_STYLE below): Opland/Selected ID15 stay
-// underneath it; the two stream layers and Bluespot stay on top of it, in
-// that order, so streams read as continuous across the AOI boundary and
-// Bluespot -- the top layer of the whole map -- is never broken up by
-// either the streams or the AOI hatch crossing it.
+// The complete map draw order, bottom to top, in one list -- everything
+// this app puts on the map, AOI included, reads its stacking from this
+// single source of truth (see reassertMapLayerOrder and renderResults).
 //
-// Note the AOI's black hachure border can now be covered by Bluespot's
-// solid fill wherever the two overlap, since Bluespot sits above it here
-// -- a deliberate tradeoff for putting Bluespot on top, not an oversight.
-const RESULT_LAYER_ORDER_BELOW_AOI = ["Selected ID15", "Opland"];
-const RESULT_LAYER_ORDER_ABOVE_AOI = ["Vandveje (ID15)", "Vandveje (Opland)", "Bluespot"];
+// One real constraint on that "single list" framing, worth being honest
+// about rather than glossing over: "AOI" isn't drawn by the same
+// mechanism as everything after it. Canvas can't do the hatch's pattern
+// fill, so the AOI overlay lives on its own SVG renderer, in its own
+// Leaflet pane, pinned by a fixed CSS z-index below the shared canvas
+// pane every other entry here draws to (see initAoiHatchPattern). A
+// pane's z-index is an absolute number, not a per-item position -- it
+// can only put the AOI entirely below or entirely above ALL canvas
+// content, never threaded between two canvas items the way this list's
+// syntax might suggest. That's exactly the bug this list replaced: it
+// used to be assumed that insertion order plus bringToFront() calls were
+// enough to keep the AOI sandwiched between Opland and the streams --
+// confirmed by testing that this was never actually true, since the
+// AOI's pane sat above the canvas regardless of any per-layer call. So
+// "AOI" stays first (bottom) here on purpose, matching where it actually
+// ends up -- move it anywhere but the very bottom of this list and the
+// code would be lying about what the browser actually renders.
+//
+// Below AOI's line -- among the layers that DO share one real canvas --
+// this list means exactly what it looks like: Bluespot last, so it's the
+// single topmost thing this app ever draws.
+const MAP_LAYER_ORDER = ["AOI", "Selected ID15", "Opland", "Vandveje (ID15)", "Vandveje (Opland)", "Bluespot"];
 
-// The polygon actually submitted for analysis (a selected Kloakoplande
+// The polygon actually submitted for analysis (a selected reference-layer
 // feature or a freehand drawing) is styled as a cartographic AOI marker,
 // not another data layer -- solid black border, diagonal-hatch fill (see
 // initAoiHatchPattern) rather than a solid color. That's a deliberate
@@ -60,18 +74,22 @@ const RESULT_LAYER_ORDER_ABOVE_AOI = ["Vandveje (ID15)", "Vandveje (Opland)", "B
 // alike), whereas any other saturated color risks blending into one of
 // them; hachures are the standard cartographic convention for "extent of
 // analysis" precisely because they read as a structural frame rather
-// than a result. The hatch's open gaps keep the Opland fill underneath
-// visible; it sits above Opland/Selected ID15 but below the two stream
-// layers and Bluespot, so streams stay unbroken crossing it and Bluespot
-// -- the top layer of the whole map -- is never broken up by it either.
-// The tradeoff: the hatch's own black border can get covered by
-// Bluespot's solid fill wherever the two overlap.
+// than a result. It now sits in its own pane below every canvas-drawn
+// layer, Opland included -- see the comment on RESULT_LAYER_ORDER_* above
+// for why, and why that's an intentional tradeoff.
 const ANALYZED_AREA_STYLE = { color: "#000000", weight: 3, fillColor: "url(#aoi-hatch)", fillOpacity: 1, interactive: false };
 
-let map, kloakLayer, drawnLayer, drawControl, aoiRenderer;
+let map, drawnLayer, drawControl, aoiRenderer;
 let selectedGeometry = null;
 let selectedLabel = null;
-let selectedAreaCode = null;
+// Which reference layer (jordstykker/kloakomrader/lokalplanomrader) the
+// current selection came from, and the exact Leaflet sub-layer clicked --
+// replaces the old Kloakoplande-specific navn1201 matching, since the
+// three sources don't share a common natural key. Object identity on
+// selectedLeafletLayer is what "click the same shape again to deselect"
+// and the highlight styling key off now, not a property match.
+let selectedLayerKey = null;
+let selectedLeafletLayer = null;
 let currentMode = "select";
 let resultLayers = {};
 let analyzedAreaLayer = null;
@@ -127,8 +145,25 @@ function initMap() {
 // hatch <pattern> injected into that renderer's own <svg> once up front.
 // ANALYZED_AREA_STYLE references it by id ("url(#aoi-hatch)"), the same
 // way any ordinary SVG fill color would be referenced.
+//
+// That separate renderer is exactly why bringToFront()/insertion order
+// alone can never put the AOI where it's supposed to sit relative to the
+// canvas-drawn result layers: bringToFront() only reorders layers WITHIN
+// one renderer, and the two renderers' root elements (an <svg>, a
+// <canvas>) get their OWN CSS z-index from Leaflet directly, which
+// overrides plain DOM order. Confirmed by testing, not assumed -- the
+// AOI's <svg> was landing on z-index 200 against the shared canvas's
+// 100, so the hatch rendered on top of Bluespot/streams regardless of
+// any bringToFront() call on either side.
+//
+// The fix is a dedicated pane, explicitly below Leaflet's default
+// overlayPane (z-index 400) where every canvas-rendered layer lives --
+// this pins the AOI beneath ALL of them, permanently, by an explicit
+// number rather than by hoping creation order happens to come out right.
 function initAoiHatchPattern() {
-  aoiRenderer = L.svg().addTo(map);
+  map.createPane("aoiPane");
+  map.getPane("aoiPane").style.zIndex = 350;
+  aoiRenderer = L.svg({ pane: "aoiPane" }).addTo(map);
   const svg = aoiRenderer._container;
   const ns = "http://www.w3.org/2000/svg";
 
@@ -235,85 +270,51 @@ function initDrawing() {
   });
 }
 
-async function loadKloakoplande() {
-  const res = await fetch("data/kloakoplande.geojson");
-  const geojson = await res.json();
-
-  // Bright orange -- deliberately far from the teal used everywhere else
-  // on the map, so the selectable plan-area layer reads as its own thing
-  // at a glance, not just another shade of the base styling.
-  kloakLayer = L.geoJSON(geojson, {
-    style: () => ({ color: "#c2410c", weight: 1.5, fillColor: "#f97316", fillOpacity: 0.22 }),
-    onEachFeature: (feature, layer) => {
-      // Clicking the already-selected feature again deselects it, rather
-      // than being a one-way trip that only another selection can undo.
-      layer.on("click", () => {
-        if (isRunning) return;
-        if (feature.properties.navn1201 === selectedAreaCode) clearSelection();
-        else selectAreaFeature(feature, layer);
-      });
-    },
-  }).addTo(map);
-
-  map.fitBounds(kloakLayer.getBounds(), { padding: [40, 40] });
-
-  const areas = geojson.features
-    .map((f) => f.properties.navn1201)
-    .sort();
-  renderAreaList(areas, geojson);
+// Builds this feature's sidebar label from whichever properties that
+// source actually carries -- the three WFS sources don't share a schema,
+// so there's no single field name to reach for the way navn1201 used to
+// be the one true key for the old Kloakoplande-only design.
+function referenceFeatureLabel(layerKey, feature) {
+  const p = feature.properties || {};
+  if (layerKey === "jordstykker") {
+    return `Jordstykke ${p.matrikelnr || "?"}, ${p.ejerlavnavn || "ukendt ejerlav"}`;
+  }
+  const kind = layerKey === "kloakomrader" ? "Kloakområde" : "Lokalplan";
+  return p.plannavn ? `${kind} ${p.plannr} – ${p.plannavn}` : `${kind} ${p.plannr || "?"}`;
 }
 
-function renderAreaList(codes, geojson) {
-  const list = document.getElementById("area-list");
-  list.innerHTML = "";
-  codes.forEach((code) => {
-    const feature = geojson.features.find((f) => f.properties.navn1201 === code);
-    const li = document.createElement("li");
-    li.className = "area-item";
-    li.dataset.code = code;
-    li.innerHTML = `<span class="code">${code}</span><span class="status-dot" title="${feature.properties.status || ""}"></span>`;
-    li.addEventListener("click", () => {
-      if (isRunning) return;
-      if (code === selectedAreaCode) { clearSelection(); return; }
-      const layer = findKloakLayerByCode(code);
-      if (layer) selectAreaFeature(feature, layer);
-    });
-    list.appendChild(li);
-  });
-}
-
-function findKloakLayerByCode(code) {
-  let found = null;
-  kloakLayer.eachLayer((layer) => {
-    if (layer.feature.properties.navn1201 === code) found = layer;
-  });
-  return found;
-}
-
-function selectAreaFeature(feature, layer) {
+// Clicking the already-selected shape again deselects it, matching the
+// old Kloakoplande list's behaviour -- not a one-way trip that only
+// picking something else can undo.
+function selectReferenceFeature(layerKey, feature, layer) {
   if (isRunning) return;
-  kloakLayer.eachLayer((l) => kloakLayer.resetStyle(l));
-  layer.setStyle({ color: "#9a3412", weight: 3, fillColor: "#f97316", fillOpacity: 0.45 });
+  if (layer === selectedLeafletLayer) {
+    clearSelection();
+    return;
+  }
+
+  clearSelection();
+  layer.setStyle({ weight: 3, fillOpacity: 0.35, fillColor: REFERENCE_LAYER_STYLES[layerKey].color });
   layer.bringToFront();
 
-  document.querySelectorAll(".area-item").forEach((el) => {
-    el.classList.toggle("is-selected", el.dataset.code === feature.properties.navn1201);
-  });
-
   selectedGeometry = feature.geometry;
-  selectedLabel = `Kloakområde ${feature.properties.navn1201}`;
-  selectedAreaCode = feature.properties.navn1201;
+  selectedLabel = referenceFeatureLabel(layerKey, feature);
+  selectedLayerKey = layerKey;
+  selectedLeafletLayer = layer;
   updateSelectionUI();
 }
 
-// Also resets any Kloakoplande highlight -- covers both an explicit
+// Also resets any reference-layer highlight -- covers both an explicit
 // deselect click and switching away from "select" mode, which previously
-// left the last-selected plan area visually highlighted even after its
-// selection no longer meant anything.
+// (with the old Kloakoplande-only design) left the last-selected plan
+// area visually highlighted even after its selection no longer meant
+// anything.
 function clearSelection() {
-  if (kloakLayer) kloakLayer.eachLayer((l) => kloakLayer.resetStyle(l));
-  document.querySelectorAll(".area-item").forEach((el) => el.classList.remove("is-selected"));
-  selectedAreaCode = null;
+  if (selectedLayerKey && referenceLayers[selectedLayerKey]) {
+    referenceLayers[selectedLayerKey].resetStyle(selectedLeafletLayer);
+  }
+  selectedLayerKey = null;
+  selectedLeafletLayer = null;
   selectedGeometry = null;
   selectedLabel = null;
   updateSelectionUI();
@@ -341,7 +342,7 @@ function setUILocked(locked) {
   document.querySelectorAll(".mode-tab, #start-draw, #clear-draw").forEach((el) => {
     el.disabled = locked;
   });
-  document.getElementById("area-list").classList.toggle("is-locked", locked);
+  document.getElementById("layers-list").classList.toggle("is-locked", locked);
   document.getElementById("run-btn").disabled = locked || !selectedGeometry;
 }
 
@@ -437,13 +438,22 @@ function applyStreamWidthScale() {
   });
 }
 
-// Re-pins the analyzed-area outline, the two stream layers, and Bluespot
-// back to the front, in that order, after any legend checkbox re-adds a
-// layer (re-adding always puts it on top again, which would otherwise
-// bury whichever of these is supposed to stay above it).
-function reassertAoiAndStreamOrder() {
-  if (analyzedAreaLayer) analyzedAreaLayer.bringToFront();
-  RESULT_LAYER_ORDER_ABOVE_AOI.forEach((name) => {
+// Walks MAP_LAYER_ORDER bottom to top, re-pinning each entry to the front
+// of its own renderer in turn -- after this runs, the last entry
+// (Bluespot) is guaranteed topmost again. Needed after anything that
+// might have disturbed the order: a legend checkbox re-adding a layer, or
+// a reference layer refreshing on pan (re-adding always puts a layer on
+// top again, which would otherwise bury whichever of these is supposed
+// to stay above it). The "AOI" entry's bringToFront() only matters within
+// its own tiny single-shape SVG renderer -- its position relative to the
+// canvas is fixed by the pane z-index instead, see the comment on
+// MAP_LAYER_ORDER above.
+function reassertMapLayerOrder() {
+  MAP_LAYER_ORDER.forEach((name) => {
+    if (name === "AOI") {
+      if (analyzedAreaLayer) analyzedAreaLayer.bringToFront();
+      return;
+    }
     if (resultLayers[name]) resultLayers[name].bringToFront();
   });
 }
@@ -496,7 +506,7 @@ function renderResults(layers, label, geometry) {
     li.querySelector("input").addEventListener("change", (e) => {
       if (e.target.checked) {
         layer.addTo(map);
-        reassertAoiAndStreamOrder();
+        reassertMapLayerOrder();
       } else {
         map.removeLayer(layer);
       }
@@ -504,20 +514,22 @@ function renderResults(layers, label, geometry) {
     legend.appendChild(li);
   }
 
-  // Add order matters here (see RESULT_LAYER_ORDER_* comment above): the
-  // AOI overlay is created in between the two groups, so it naturally
-  // lands above Opland/Bluespot/Selected ID15 and below the streams
-  // without needing bringToFront() on the very first render.
-  RESULT_LAYER_ORDER_BELOW_AOI.forEach(addResultLayer);
-
-  if (geometry) {
-    analyzedAreaLayer = L.geoJSON(
-      { type: "Feature", geometry, properties: {} },
-      { style: () => ANALYZED_AREA_STYLE, renderer: aoiRenderer }
-    ).addTo(map);
-  }
-
-  RESULT_LAYER_ORDER_ABOVE_AOI.forEach(addResultLayer);
+  // One loop over the one list (see MAP_LAYER_ORDER) -- for every entry
+  // except "AOI" this just means calling addResultLayer in that order;
+  // "AOI" is the one entry built differently, since it isn't one of the
+  // named result layers the backend returns.
+  MAP_LAYER_ORDER.forEach((name) => {
+    if (name === "AOI") {
+      if (geometry) {
+        analyzedAreaLayer = L.geoJSON(
+          { type: "Feature", geometry, properties: {} },
+          { style: () => ANALYZED_AREA_STYLE, renderer: aoiRenderer }
+        ).addTo(map);
+      }
+      return;
+    }
+    addResultLayer(name);
+  });
 
   // Reflect the persisted scale in the slider itself, in case it was
   // adjusted on a previous run -- it shouldn't silently reset to 1 here.
@@ -526,13 +538,12 @@ function renderResults(layers, label, geometry) {
 
   document.getElementById("results-panel").classList.remove("is-hidden");
 
-  // Once there's a preselected polygon's results to look at, the plan-area
-  // list (search box + the whole scrollable Vælg et kloakområde list) has
-  // done its job and just eats vertical space -- collapsing it is what
-  // gives the stream-width slider real presence without scrolling. Draw
-  // mode already gets this for free (its panel is just two buttons, far
-  // shorter than the list to begin with), which is why only select mode
-  // needs the collapse triggered explicitly.
+  // Once there's a preselected area's results to look at, the layer
+  // toggle list has done its job and just eats vertical space --
+  // collapsing it is what gives the stream-width slider real presence
+  // without scrolling. Draw mode already gets this for free (its panel is
+  // just two buttons, far shorter to begin with), which is why only
+  // select mode needs the collapse triggered explicitly.
   if (currentMode === "select") {
     document.querySelector('.mode-panel[data-mode-panel="select"]').classList.add("is-collapsed");
   }
@@ -602,17 +613,9 @@ function init() {
   initAoiHatchPattern();
   initBasemapToggle();
   initDrawing();
-  loadKloakoplande();
 
   document.querySelectorAll(".mode-tab").forEach((btn) => {
     btn.addEventListener("click", () => setMode(btn.dataset.mode));
-  });
-
-  document.getElementById("area-search").addEventListener("input", (e) => {
-    const q = e.target.value.trim().toLowerCase();
-    document.querySelectorAll(".area-item").forEach((el) => {
-      el.style.display = el.dataset.code.toLowerCase().includes(q) ? "" : "none";
-    });
   });
 
   document.getElementById("run-btn").addEventListener("click", runAnalysis);
@@ -625,6 +628,185 @@ function init() {
 
   initExportButton();
   initFeedbackLink();
+  initSelectableLayers();
+}
+
+// --- Selectable reference layers (Jordstykker, Kloakområder, Lokalplanområder) ---
+//
+// These ARE the area picker now -- there is no separate static list.
+// Originally Kloakoplande.gpkg (a bundled local file, VL002/VL003/...)
+// drove selection while these three existed only as passive background
+// context; that meant two disconnected things both called "kloakområde"
+// on screen at once. Replaced entirely: toggle a layer on, click a shape
+// on the map, that's the analysis area -- one live, authoritative source
+// per layer type instead of a local file duplicating what Plandata
+// already publishes.
+//
+// Fetched by whatever's currently on screen, not the whole kommune --
+// confirmed necessary by testing before building this. Vejle alone has
+// 2,338 kloakområder and 857 lokalplaner, the unfiltered lokalplan
+// response running ~6.8MB (each feature carries ~250 attribute fields we
+// don't use). Viewport scoping plus PROPERTYNAME trimming keeps each
+// fetch small and fast regardless of kommune size -- and, unlike the old
+// design, a click-to-select model doesn't need every feature loaded at
+// once anyway, only whatever's currently visible.
+//
+// Two services, two real coordinate-order gotchas -- both found by
+// testing, not assumed, so documented here rather than left to bite
+// again:
+//   - Dataforsyningen's jordstykker `polygon` param wants ordinary
+//     [lon,lat] pairs, same order as GeoJSON.
+//   - Plandata's WFS native `BBOX` param wants [lat,lon,lat,lon] --
+//     backwards from GeoJSON. A [lon,lat] bbox doesn't error, it just
+//     silently matches zero features, which is a much easier mistake to
+//     miss than an outright failure.
+//   - Plandata's geometry column is literally named "geometri" (not the
+//     usual geom/the_geom) -- and PROPERTYNAME must list it explicitly,
+//     since GeoServer only includes attributes you name once that
+//     parameter is present at all; leaving it out silently drops the
+//     geometry too, not just the extra attributes.
+
+const REFERENCE_LAYER_STYLES = {
+  jordstykker: { color: "#94a3b8", weight: 1, fillOpacity: 0.03 },
+  kloakomrader: { color: "#b45309", weight: 1.4, dashArray: "4,3", fillOpacity: 0.05 },
+  lokalplanomrader: { color: "#7e22ce", weight: 1.4, dashArray: "4,3", fillOpacity: 0.05 },
+};
+
+// A cap, not a hard limit the UI hides -- if a fetch comes back at exactly
+// this count, there's very likely more just outside it, and the note
+// under that layer's checkbox says so rather than silently truncating.
+const REFERENCE_LAYER_MAX_FEATURES = 300;
+
+let referenceLayers = { jordstykker: null, kloakomrader: null, lokalplanomrader: null };
+// Bumped on every fetch kicked off for a given layer, so a slow older
+// request can recognize it's stale (a newer pan already superseded it)
+// and discard its result instead of clobbering what's now on screen.
+let referenceLayerRequestId = { jordstykker: 0, kloakomrader: 0, lokalplanomrader: 0 };
+
+function boundsToLonLatRing(bounds) {
+  const sw = bounds.getSouthWest();
+  const ne = bounds.getNorthEast();
+  return [[
+    [sw.lng, sw.lat], [ne.lng, sw.lat], [ne.lng, ne.lat], [sw.lng, ne.lat], [sw.lng, sw.lat],
+  ]];
+}
+
+async function fetchJordstykker(bounds) {
+  const ring = boundsToLonLatRing(bounds);
+  const url = "https://api.dataforsyningen.dk/jordstykker?" + new URLSearchParams({
+    format: "geojson",
+    per_side: String(REFERENCE_LAYER_MAX_FEATURES),
+    polygon: JSON.stringify(ring),
+  });
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`jordstykker: ${res.status}`);
+  return res.json();
+}
+
+async function fetchPlandataLayer(typeName, bounds) {
+  const sw = bounds.getSouthWest();
+  const ne = bounds.getNorthEast();
+  const bbox = `${sw.lat},${sw.lng},${ne.lat},${ne.lng},urn:ogc:def:crs:EPSG::4326`;
+  const url = "https://geoserver.plandata.dk/geoserver/wfs?" + new URLSearchParams({
+    service: "WFS", version: "2.0.0", request: "GetFeature",
+    typeName: `pdk:${typeName}`, outputFormat: "application/json",
+    srsName: "EPSG:4326", BBOX: bbox,
+    PROPERTYNAME: "geometri,plannavn,plannr",
+    count: String(REFERENCE_LAYER_MAX_FEATURES),
+  });
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${typeName}: ${res.status}`);
+  return res.json();
+}
+
+const REFERENCE_LAYER_FETCHERS = {
+  jordstykker: (bounds) => fetchJordstykker(bounds),
+  kloakomrader: (bounds) => fetchPlandataLayer("theme_pdk_kloakopland_vedtaget", bounds),
+  lokalplanomrader: (bounds) => fetchPlandataLayer("theme_pdk_lokalplan_vedtaget", bounds),
+};
+
+function setReferenceLayerNote(key, text) {
+  const el = document.querySelector(`[data-note="${key}"]`);
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("is-hidden", !text);
+}
+
+async function refreshReferenceLayer(key) {
+  const checkbox = document.querySelector(`input[data-layer="${key}"]`);
+  if (!checkbox || !checkbox.checked) return;
+
+  // Never swap out the layer holding the current selection out from under
+  // the user mid-pan -- they've committed to a shape, so the ground it's
+  // drawn on should stay put (and stay highlighted) until they explicitly
+  // clear it, even though every OTHER toggled-on layer keeps refreshing
+  // live as normal.
+  if (key === selectedLayerKey) return;
+
+  const requestId = ++referenceLayerRequestId[key];
+  try {
+    const geojson = await REFERENCE_LAYER_FETCHERS[key](map.getBounds());
+    if (requestId !== referenceLayerRequestId[key]) return; // superseded by a later pan
+    if (!checkbox.checked) return; // toggled off while the fetch was in flight
+    if (key === selectedLayerKey) return; // got selected while the fetch was in flight
+
+    if (referenceLayers[key]) map.removeLayer(referenceLayers[key]);
+    const layer = L.geoJSON(geojson, {
+      style: () => REFERENCE_LAYER_STYLES[key],
+      onEachFeature: (feature, featureLayer) => {
+        featureLayer.on("click", () => selectReferenceFeature(key, feature, featureLayer));
+      },
+    });
+    layer.addTo(map);
+    referenceLayers[key] = layer;
+
+    // Re-adding a layer always draws it on top of whatever's already on
+    // the map -- harmless before an analysis has run, but after one has,
+    // this would otherwise silently bury Bluespot/streams under whichever
+    // reference layer next refreshes on a pan. A no-op when there are no
+    // results yet (see the guards inside reassertMapLayerOrder).
+    reassertMapLayerOrder();
+
+    const count = geojson.features ? geojson.features.length : 0;
+    setReferenceLayerNote(
+      key,
+      count >= REFERENCE_LAYER_MAX_FEATURES ? "Kun de første i udsnittet -- zoom ind for flere." : ""
+    );
+  } catch (err) {
+    if (requestId !== referenceLayerRequestId[key]) return;
+    setReferenceLayerNote(key, "Kunne ikke hente laget.");
+  }
+}
+
+function initSelectableLayers() {
+  document.querySelectorAll("#layers-list input[type=\"checkbox\"]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const key = checkbox.dataset.layer;
+      if (checkbox.checked) {
+        refreshReferenceLayer(key);
+      } else {
+        // Hiding the layer that the current selection came from: the
+        // selected shape is now invisible, so the selection itself no
+        // longer means anything either.
+        if (key === selectedLayerKey) clearSelection();
+        if (referenceLayers[key]) {
+          map.removeLayer(referenceLayers[key]);
+          referenceLayers[key] = null;
+        }
+        setReferenceLayerNote(key, "");
+      }
+    });
+  });
+
+  // Debounced: refetches whichever reference layers are active any time
+  // the visible area changes, rather than on every intermediate pan frame.
+  let moveTimer = null;
+  map.on("moveend", () => {
+    clearTimeout(moveTimer);
+    moveTimer = setTimeout(() => {
+      Object.keys(REFERENCE_LAYER_FETCHERS).forEach(refreshReferenceLayer);
+    }, 400);
+  });
 }
 
 // The feedback address is a <button>, not a plain mailto: <a>, and

@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-<link rel="stylesheet" href="style.css?v=9">
+<link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
 
@@ -30,16 +30,38 @@
 
     <section class="panel">
       <div class="mode-tabs" role="tablist">
-        <button class="mode-tab is-active" data-mode="select" role="tab" aria-selected="true">Vælg et kloakområde</button>
+        <button class="mode-tab is-active" data-mode="select" role="tab" aria-selected="true">Vælg på kortet</button>
         <button class="mode-tab" data-mode="draw" role="tab" aria-selected="false">Tegn dit eget</button>
       </div>
 
       <div class="mode-panel" data-mode-panel="select">
-        <div class="search-row">
-          <svg class="search-icon" viewBox="0 0 20 20" fill="none"><path d="M9 16a7 7 0 1 1 0-14 7 7 0 0 1 0 14Zm9 2-4.35-4.35" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-          <input id="area-search" type="text" placeholder="Filtrér efter plankode…" autocomplete="off">
-        </div>
-        <ul id="area-list" class="area-list"></ul>
+        <p class="hint">Vælg et lag, og klik derefter en form på kortet for at bruge den som dit analyseområde.</p>
+        <ul class="layers-list" id="layers-list">
+          <li class="layers-item">
+            <label>
+              <input type="checkbox" data-layer="jordstykker">
+              <span class="layers-swatch" style="border-color:#94a3b8"></span>
+              <span class="layers-name">Jordstykker</span>
+            </label>
+            <span class="layers-note is-hidden" data-note="jordstykker"></span>
+          </li>
+          <li class="layers-item">
+            <label>
+              <input type="checkbox" data-layer="kloakomrader">
+              <span class="layers-swatch" style="border-color:#b45309"></span>
+              <span class="layers-name">Kloakområder</span>
+            </label>
+            <span class="layers-note is-hidden" data-note="kloakomrader"></span>
+          </li>
+          <li class="layers-item">
+            <label>
+              <input type="checkbox" data-layer="lokalplanomrader">
+              <span class="layers-swatch" style="border-color:#7e22ce"></span>
+              <span class="layers-name">Lokalplanområder</span>
+            </label>
+            <span class="layers-note is-hidden" data-note="lokalplanomrader"></span>
+          </li>
+        </ul>
       </div>
 
       <div class="mode-panel is-hidden" data-mode-panel="draw">
@@ -137,6 +159,6 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
-<script src="app.js?v=17"></script>
+<script src="app.js?v=23"></script>
 </body>
 </html>
