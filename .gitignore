@@ -2,6 +2,12 @@
 .env
 Scripts/.env
 
+# Local working notes for handing off between chat sessions -- states
+# business intent (monetization plans) that deliberately shouldn't sit in
+# a public repo. Enforced here rather than left to memory alone, since
+# whatever picks this up next might not know that.
+HANDOVER.md
+
 # Runtime-generated pipeline output (regenerated on each run)
 Data/Output/
 Data/Temporary/
