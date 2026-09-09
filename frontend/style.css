@@ -328,6 +328,57 @@ html, body {
 }
 
 
+/* ---------- Coverage note ---------- */
+/* A small standing disclosure, not a dismissible banner -- it stays put
+   below the header regardless of mode, since the "only one catchment has
+   real data" fact applies to every selection method (map click, drawing,
+   upload alike), not just to whichever one happens to be active. Amber
+   reads as "heads up", not "error" -- there's nothing wrong, it's just
+   an honest scope statement. */
+.coverage-note {
+  display: flex;
+  gap: 10px;
+  background: #fffaeb;
+  border: 1px solid #fde8a4;
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #7a5c05;
+}
+@media (prefers-color-scheme: dark) {
+  .coverage-note {
+    background: rgba(217, 172, 33, 0.08);
+    border-color: rgba(217, 172, 33, 0.28);
+    color: #e0b93c;
+  }
+}
+.coverage-note-icon {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  margin-top: 1px;
+}
+.coverage-note p { margin: 0; }
+
+/* ---------- Upload panel ---------- */
+
+.upload-btn { margin-bottom: 8px; }
+
+.upload-formats {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin: 0 0 4px;
+  line-height: 1.4;
+}
+
+.upload-status {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin: 8px 0 0;
+}
+.upload-status.is-error { color: var(--danger); }
+
 .sidebar-spacer { flex: 1; }
 
 /* A <button>, not an <a href="mailto:...">, on purpose: an anchor would

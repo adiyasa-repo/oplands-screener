@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-<link rel="stylesheet" href="style.css?v=12">
+<link rel="stylesheet" href="style.css?v=13">
 </head>
 <body>
 
@@ -28,10 +28,16 @@
       </div>
     </header>
 
+    <div class="coverage-note">
+      <svg viewBox="0 0 20 20" fill="none" class="coverage-note-icon"><circle cx="10" cy="10" r="7.25" stroke="currentColor" stroke-width="1.5"/><path d="M10 9v4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="6.7" r="0.9" fill="currentColor"/></svg>
+      <p>Hydrologiske data er pt. kun genereret for ID15-oplandet omkring kortets startposition.</p>
+    </div>
+
     <section class="panel">
       <div class="mode-tabs" role="tablist">
         <button class="mode-tab is-active" data-mode="select" role="tab" aria-selected="true">Vælg på kortet</button>
         <button class="mode-tab" data-mode="draw" role="tab" aria-selected="false">Tegn dit eget</button>
+        <button class="mode-tab" data-mode="upload" role="tab" aria-selected="false">Upload fil</button>
       </div>
 
       <div class="mode-panel" data-mode-panel="select">
@@ -79,6 +85,17 @@
           Start tegning
         </button>
         <button id="clear-draw" class="btn btn-ghost is-hidden">Ryd tegning</button>
+      </div>
+
+      <div class="mode-panel is-hidden" data-mode-panel="upload">
+        <p class="hint">Upload din egen fil med én eller flere polygoner. Panorér til stedet på kortet, og klik derefter en af polygonerne for at bruge den som dit analyseområde.</p>
+        <label for="upload-file-input" class="btn btn-secondary upload-btn">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M10 13V4m0 0 3.2 3.2M10 4 6.8 7.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 14v1.5A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5V14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          Vælg fil
+        </label>
+        <input type="file" id="upload-file-input" accept=".geojson,.json,.gpkg,.zip" hidden>
+        <p class="upload-formats">GeoJSON, GeoPackage (.gpkg) eller zippet Shapefile (.zip) · maks. 40 MB</p>
+        <p class="upload-status is-hidden" id="upload-status"></p>
       </div>
     </section>
 
@@ -167,6 +184,6 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
-<script src="app.js?v=24"></script>
+<script src="app.js?v=25"></script>
 </body>
 </html>

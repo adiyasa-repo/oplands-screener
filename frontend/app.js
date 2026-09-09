@@ -279,6 +279,9 @@ function referenceFeatureLabel(layerKey, feature) {
   if (layerKey === "jordstykker") {
     return `Jordstykke ${p.matrikelnr || "?"}, ${p.ejerlavnavn || "ukendt ejerlav"}`;
   }
+  if (layerKey === "upload") {
+    return p.label || "Uploadet polygon";
+  }
   const kind = layerKey === "kloakomrader" ? "Kloakområde" : "Lokalplan";
   return p.plannavn ? `${kind} ${p.plannr} – ${p.plannavn}` : `${kind} ${p.plannr || "?"}`;
 }
@@ -339,7 +342,7 @@ function updateSelectionUI() {
 // area while the in-flight (and soon-rendered) results were for another.
 function setUILocked(locked) {
   isRunning = locked;
-  document.querySelectorAll(".mode-tab, #start-draw, #clear-draw").forEach((el) => {
+  document.querySelectorAll(".mode-tab, #start-draw, #clear-draw, #upload-file-input").forEach((el) => {
     el.disabled = locked;
   });
   document.getElementById("layers-list").classList.toggle("is-locked", locked);
@@ -629,6 +632,7 @@ function init() {
   initExportButton();
   initFeedbackLink();
   initSelectableLayers();
+  initUploadPanel();
 }
 
 // --- Selectable reference layers (Jordstykker, Kloakområder, Lokalplanområder) ---
@@ -683,6 +687,13 @@ const REFERENCE_LAYER_STYLES = {
   kloakomrader: { color: "#b45309", weight: 1.4, dashArray: "4,3", fillOpacity: 0.05 },
   lokalplanomrader: { color: "#7e22ce", weight: 1.4, dashArray: "4,3", fillOpacity: 0.05 },
   id15: { color: "#15803d", weight: 1.5, fillOpacity: 0, interactive: false },
+  // Not fetched from a WFS like the other four -- populated once per
+  // upload from parse_upload.py's response (see handleUploadFile below).
+  // Reuses the exact same selection machinery (selectReferenceFeature/
+  // clearSelection/referenceLayers) rather than a parallel implementation,
+  // since "click a shape, it becomes the AOI" is identical behaviour
+  // either way -- only where the shapes come from differs.
+  upload: { color: "#be185d", weight: 1.6, dashArray: "4,3", fillOpacity: 0.08 },
 };
 
 // A cap, not a hard limit the UI hides -- if a fetch comes back at exactly
@@ -690,7 +701,7 @@ const REFERENCE_LAYER_STYLES = {
 // under that layer's checkbox says so rather than silently truncating.
 const REFERENCE_LAYER_MAX_FEATURES = 300;
 
-let referenceLayers = { jordstykker: null, kloakomrader: null, lokalplanomrader: null, id15: null };
+let referenceLayers = { jordstykker: null, kloakomrader: null, lokalplanomrader: null, id15: null, upload: null };
 // Bumped on every fetch kicked off for a given layer, so a slow older
 // request can recognize it's stale (a newer pan already superseded it)
 // and discard its result instead of clobbering what's now on screen.
@@ -803,6 +814,81 @@ async function refreshReferenceLayer(key) {
     if (requestId !== referenceLayerRequestId[key]) return;
     setReferenceLayerNote(key, "Kunne ikke hente laget.");
   }
+}
+
+// ---------- Upload-your-own-polygon ----------
+//
+// The parsing itself happens server-side (backend/parse_upload.py, run as
+// its own subprocess -- see that file's docstring for why this can't be
+// done in-process). This just posts the file and renders whatever GeoJSON
+// comes back using the exact same click-to-select machinery as the three
+// WFS reference layers (see REFERENCE_LAYER_STYLES/selectReferenceFeature
+// above) -- pan/zoom-then-click on the map, not a separate sidebar list.
+// A list was tried and dropped: a file can carry hundreds of features, and
+// a list that long is worse UX than just panning to the spot you already
+// care about and clicking it, the same way the three WFS layers already
+// work.
+const UPLOAD_MAX_BYTES = 40 * 1024 * 1024; // kept in sync with backend/app.py's own cap
+
+function setUploadStatus(text, isError) {
+  const el = document.getElementById("upload-status");
+  el.textContent = text;
+  el.classList.toggle("is-hidden", !text);
+  el.classList.toggle("is-error", !!isError);
+}
+
+async function handleUploadFile(file) {
+  if (!file) return;
+  if (isRunning) return;
+
+  if (file.size > UPLOAD_MAX_BYTES) {
+    setUploadStatus("Filen er for stor. Maks 40 MB pr. fil.", true);
+    return;
+  }
+
+  clearSelection();
+  if (referenceLayers.upload) {
+    map.removeLayer(referenceLayers.upload);
+    referenceLayers.upload = null;
+  }
+  setUploadStatus("Behandler fil…", false);
+
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${API_BASE}/upload-polygon`, { method: "POST", body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Filen kunne ikke behandles.");
+
+    const geojson = { type: "FeatureCollection", features: data.features };
+    const layer = L.geoJSON(geojson, {
+      style: () => REFERENCE_LAYER_STYLES.upload,
+      onEachFeature: (feature, featureLayer) => {
+        featureLayer.on("click", () => selectReferenceFeature("upload", feature, featureLayer));
+      },
+    });
+    layer.addTo(map);
+    referenceLayers.upload = layer;
+    reassertMapLayerOrder();
+    map.fitBounds(layer.getBounds(), { padding: [60, 60] });
+
+    let statusText = `${data.feature_count} polygon(er) indlæst på kortet. Klik en af dem for at vælge den.`;
+    if (data.dropped_non_polygon_count > 0) {
+      statusText += ` (${data.dropped_non_polygon_count} ikke-polygon-objekt(er) i filen blev ignoreret.)`;
+    }
+    setUploadStatus(statusText, false);
+  } catch (err) {
+    setUploadStatus(err.message || "Filen kunne ikke behandles.", true);
+  }
+}
+
+function initUploadPanel() {
+  const input = document.getElementById("upload-file-input");
+  input.addEventListener("change", () => {
+    const file = input.files && input.files[0];
+    handleUploadFile(file);
+    input.value = ""; // allows re-selecting the same filename after a fix
+  });
 }
 
 function initSelectableLayers() {

@@ -21,19 +21,23 @@ import time
 import uuid
 import threading
 import subprocess
+import tempfile
 import urllib.request
 import urllib.parse
 import urllib.error
 from typing import Any, Dict
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 JOBS_DIR = os.path.join(BACKEND_DIR, "workdir", "jobs")
+UPLOADS_DIR = os.path.join(BACKEND_DIR, "workdir", "uploads")
 RUN_JOB_SCRIPT = os.path.join(BACKEND_DIR, "run_job.py")
+PARSE_UPLOAD_SCRIPT = os.path.join(BACKEND_DIR, "parse_upload.py")
 os.makedirs(JOBS_DIR, exist_ok=True)
+os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 app = FastAPI(title="Oplands-screener API")
 
@@ -227,6 +231,98 @@ def get_job(job_id: str):
     if job is None:
         raise HTTPException(status_code=404, detail="Unknown job id")
     return job
+
+
+# --- Upload-your-own-polygon --------------------------------------------
+#
+# A third way to pick an analysis area, alongside clicking a reference
+# layer or free-drawing: upload a GeoJSON/GeoPackage/zipped-Shapefile
+# containing one or more polygons. Parsing happens in its own subprocess
+# (parse_upload.py) for the same reason run_job.py does -- geopandas/GDAL
+# aren't safe to touch from a thread sharing a process with the
+# FastAPI/uvicorn event loop. This is much lighter-weight than an
+# analysis job though (no QGIS/PCRaster, just reading and reprojecting a
+# file), finishes in well under a second, and the client waits on it
+# synchronously -- no job_id/polling needed the way /analyze has.
+#
+# Mirrors parse_upload.py's own SUPPORTED_EXTENSIONS -- duplicated rather
+# than imported from there, deliberately: importing anything from
+# parse_upload.py would pull geopandas/GDAL into this process at import
+# time, the exact thing this module's own docstring says never to do. A
+# short, rarely-changed list is a fine thing to keep in sync by hand
+# instead of sharing a live import for.
+UPLOAD_ALLOWED_EXTENSIONS = {".geojson", ".json", ".gpkg", ".zip"}
+UPLOAD_MAX_BYTES = 40 * 1024 * 1024  # 40MB -- middle of the 20-50MB range asked for
+
+
+@app.post("/upload-polygon")
+def upload_polygon(file: UploadFile = File(...)):
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in UPLOAD_ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Filtypen {ext or '(ingen)'} understøttes ikke. "
+                "Understøttede formater: GeoJSON (.geojson/.json), "
+                "GeoPackage (.gpkg), eller en zippet Shapefile (.zip)."
+            ),
+        )
+
+    # The client-supplied filename is used only to read its extension
+    # above -- never to construct a path. The file on disk gets a fresh
+    # UUID name, so nothing about a crafted filename (path traversal, a
+    # sneaky "../../" or similar) can reach the filesystem.
+    upload_id = str(uuid.uuid4())
+    input_path = os.path.join(UPLOADS_DIR, f"{upload_id}{ext}")
+    result_path = os.path.join(UPLOADS_DIR, f"{upload_id}_result.json")
+
+    # Enforced here in code, not just trusted from the Content-Length
+    # header (which can be missing or wrong on a malformed/crafted
+    # request) -- read in bounded chunks into our own file, and abort the
+    # moment the real cumulative size crosses the cap, rather than fully
+    # writing an oversized upload to disk first and checking afterward.
+    total = 0
+    try:
+        with open(input_path, "wb") as out:
+            while True:
+                chunk = file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > UPLOAD_MAX_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Filen er for stor. Maks {UPLOAD_MAX_BYTES // (1024 * 1024)} MB pr. fil.",
+                    )
+                out.write(chunk)
+    except HTTPException:
+        if os.path.isfile(input_path):
+            os.remove(input_path)
+        raise
+    finally:
+        file.file.close()
+
+    try:
+        subprocess.run(
+            [sys.executable, PARSE_UPLOAD_SCRIPT, input_path, result_path],
+            capture_output=True, text=True,
+        )
+        if not os.path.isfile(result_path):
+            raise HTTPException(status_code=500, detail="Filen kunne ikke behandles.")
+        with open(result_path, encoding="utf-8") as f:
+            result = json.load(f)
+    finally:
+        # Nothing to keep around afterward -- unlike analysis jobs (polled
+        # later via GET /jobs/{id}, hence the TTL-based eviction earlier
+        # in this file), the client is waiting on this response directly.
+        for p in (input_path, result_path):
+            if os.path.isfile(p):
+                os.remove(p)
+
+    if result.get("status") != "done":
+        raise HTTPException(status_code=400, detail=result.get("error", "Filen kunne ikke læses."))
+
+    return result
 
 
 @app.get("/health")

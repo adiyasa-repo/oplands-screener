@@ -4,3 +4,7 @@
 # PyQGIS/processing bindings.
 fastapi
 uvicorn[standard]
+# Required for FastAPI's UploadFile/multipart form handling (the
+# upload-your-own-polygon endpoint) -- FastAPI raises at import/route-
+# registration time, not just at request time, if this is missing.
+python-multipart
