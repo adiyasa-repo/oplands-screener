@@ -1,10 +1,12 @@
 # Oplands-screener
 
 A geospatial screening tool for cloudburst/drainage risk: given a
-catchment area of interest, it delineates the upstream drainage network,
+catchment area of interest, the underlying model delineates the upstream drainage network,
 computes flow accumulation under several rainfall scenarios, identifies
 low-lying "bluespot" ponding areas within the catchment, and produces a
 styled QGIS project with the results.
+
+The frontend visualizes a simplified output, focussing on the delineated catchment, streams, and bluespots.
 
 Built on GDAL, PCRaster, and PyQGIS (headless QGIS processing — no desktop
 GUI required to run the analysis).
